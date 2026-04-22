@@ -6,8 +6,6 @@ flute) players — and anyone who needs a programmable tanpura + tabla
 companion. Runs as a static web app (no build step), installs as a PWA on
 Android.
 
-**स्वर साधना** — *svara sādhanā*, "the discipline of notes."
-
 **Author:** Arun Mahapatro · **License:** MIT (see `LICENSE`)
 
 ---
