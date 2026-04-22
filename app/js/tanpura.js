@@ -39,9 +39,10 @@ const DEFAULT_PAN_INTENSITY = 0.7;
  * Ceiling applied when mapping the 0..100 UI slider to the tanpura bus
  * gain. Values above 1 provide headroom to compensate for the compressor
  * + reverb losses the tanpura bus incurs (the tabla bus bypasses reverb).
- * 1.5 at 100% ≈ +3.5 dB over unity.
+ * 1.2 at 100% ≈ +1.6 dB over unity — modest boost that stays well under
+ * the clipping threshold when concert-mode sums two correlated engines.
  */
-const OVERALL_VOLUME_CEILING = 1.5;
+const OVERALL_VOLUME_CEILING = 1.2;
 
 const ENGINE_CLASSES = [ElectronicTanpuraEngine, SampleTanpuraEngine];
 

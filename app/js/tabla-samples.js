@@ -41,7 +41,9 @@ const REFERENCE_FREQ_BY_SET = Object.freeze({
  */
 const GAIN_BY_SET = Object.freeze({
     'tabla_e_1': 1.0,
-    'tabla_c_1': 1.5,
+    'tabla_c_1': 1.2,  // Naad recordings are ~20% quieter than tabla_e_1 — kept at 1.2 rather
+                       // than 1.5 to avoid per-bol peaks exceeding 1.0 on mobile (which the
+                       // removed per-bus limiter used to absorb).
 });
 const DEFAULT_SET_GAIN = 1.0;
 

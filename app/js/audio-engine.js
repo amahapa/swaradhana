@@ -159,27 +159,19 @@ class AudioEngine {
         this.tanpuraBusGain = this.audioCtx.createGain();
         this.tanpuraBusGain.gain.value = 0.8;
 
-        // Soft-clip limiter on the tanpura bus. Concert mode sums two
-        // correlated engine instances (A + B with a ~4-cent detune), which
-        // can produce peaks above 1.0 when both the 1.5× headroom ceiling
-        // and equal-power balance contribute. A WaveShaper with a tanh
-        // curve gently rounds those peaks so they don't hit the downstream
-        // compressor as hard transients (the compressor is dynamic — too
-        // slow for instantaneous peak control).
-        this.tanpuraLimiter = this.audioCtx.createWaveShaper();
-        this.tanpuraLimiter.curve = this._buildTanhLimiterCurve(1.2);
-        this.tanpuraLimiter.oversample = '2x';
+        // Per-bus limiter removed for mobile CPU headroom. The master
+        // limiter downstream catches any remaining peaks from the summed
+        // bus. The compressor + reverb also smooth tanpura-specific peaks.
 
-        // A -> GainA -> PanA -> BusGain -> Limiter -> Compressor
+        // A -> GainA -> PanA -> BusGain -> Compressor
         this.tanpuraGainA.connect(this.tanpuraPanA);
         this.tanpuraPanA.connect(this.tanpuraBusGain);
 
-        // B -> GainB -> PanB -> BusGain -> Limiter -> Compressor
+        // B -> GainB -> PanB -> BusGain -> Compressor
         this.tanpuraGainB.connect(this.tanpuraPanB);
         this.tanpuraPanB.connect(this.tanpuraBusGain);
 
-        this.tanpuraBusGain.connect(this.tanpuraLimiter);
-        this.tanpuraLimiter.connect(this.compressor);
+        this.tanpuraBusGain.connect(this.compressor);
 
         // ================================================================
         //  Swar synth node
@@ -207,21 +199,16 @@ class AudioEngine {
         this.tablaGain = this.audioCtx.createGain();
         this.tablaGain.gain.value = 0.7;
 
-        // Soft-clip limiter on the tabla bus. Tabla bols have short, hard
-        // transients; a 1.5× loudness boost (see GAIN_BY_SET for tabla_c_1)
-        // plus occasional overlapping hits can sum above 1.0 at the
-        // destination and clip audibly ("cracking" / distortion). A
-        // WaveShaper with a gentle tanh curve rounds off those peaks with
-        // minimal audible artifact.
-        this.tablaLimiter = this.audioCtx.createWaveShaper();
-        this.tablaLimiter.curve = this._buildTanhLimiterCurve();
-        this.tablaLimiter.oversample = '2x';
+        // Per-bus limiter removed for mobile CPU headroom. Tabla peaks
+        // are handled by the master limiter downstream. To keep peaks
+        // well below clipping, the per-set GAIN_BY_SET multipliers in
+        // tabla-samples.js are kept ≤ 1.2 so velocity × setGain rarely
+        // exceeds 1.0 on typical bols.
 
-        // Tabla -> BassEQ -> TrebleEQ -> TablaGain -> Limiter -> DryMix -> Master
+        // Tabla -> BassEQ -> TrebleEQ -> TablaGain -> DryMix -> Master
         this.tablaBassEQ.connect(this.tablaTrebleEQ);
         this.tablaTrebleEQ.connect(this.tablaGain);
-        this.tablaGain.connect(this.tablaLimiter);
-        this.tablaLimiter.connect(this.dryMix);
+        this.tablaGain.connect(this.dryMix);
 
         // ================================================================
         //  Auxiliary percussion nodes

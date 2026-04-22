@@ -238,7 +238,7 @@ export class SampleTanpuraEngine {
 
         this._waveshaper = ctx.createWaveShaper();
         this._waveshaper.curve = buildSoftClipCurve(1.8);
-        this._waveshaper.oversample = '4x';
+        this._waveshaper.oversample = '2x';
         this._waveshaper.connect(this._wetGain);
 
         this._combDelay = ctx.createDelay(0.02);
@@ -395,7 +395,7 @@ export class SampleTanpuraEngine {
 
         this._waveshaper = ctx.createWaveShaper();
         this._waveshaper.curve = buildSoftClipCurve(1.8);
-        this._waveshaper.oversample = '4x';
+        this._waveshaper.oversample = '2x';
         this._waveshaper.connect(this._wetGain);
 
         this._combDelay = ctx.createDelay(0.02);
