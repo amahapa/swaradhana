@@ -111,7 +111,7 @@ class AudioEngine {
         // the summed peaks.
         this.masterLimiter = this.audioCtx.createWaveShaper();
         this.masterLimiter.curve = this._buildTanhLimiterCurve(1.0);
-        this.masterLimiter.oversample = '4x';
+        this.masterLimiter\.oversample = '2x';
 
         this.masterGain.connect(this.masterLimiter);
         this.masterLimiter.connect(this.audioCtx.destination);
@@ -168,7 +168,7 @@ class AudioEngine {
         // slow for instantaneous peak control).
         this.tanpuraLimiter = this.audioCtx.createWaveShaper();
         this.tanpuraLimiter.curve = this._buildTanhLimiterCurve(1.2);
-        this.tanpuraLimiter.oversample = '4x';
+        this.tanpuraLimiter\.oversample = '2x';
 
         // A -> GainA -> PanA -> BusGain -> Limiter -> Compressor
         this.tanpuraGainA.connect(this.tanpuraPanA);
@@ -215,7 +215,7 @@ class AudioEngine {
         // minimal audible artifact.
         this.tablaLimiter = this.audioCtx.createWaveShaper();
         this.tablaLimiter.curve = this._buildTanhLimiterCurve();
-        this.tablaLimiter.oversample = '4x';
+        this.tablaLimiter\.oversample = '2x';
 
         // Tabla -> BassEQ -> TrebleEQ -> TablaGain -> Limiter -> DryMix -> Master
         this.tablaBassEQ.connect(this.tablaTrebleEQ);
