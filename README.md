@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Swaradhana
 
 A browser-based Hindustani Classical Music practice app for bansuri (bamboo
