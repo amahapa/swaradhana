@@ -208,6 +208,19 @@ class AudioEngine {
         this.kartaalGain.connect(this.dryMix);
 
         this._initialized = true;
+
+        // Follow the system default output (speaker / Bluetooth) so that
+        // connecting a BT device mid-session migrates Web Audio too.
+        // AudioContext.setSinkId is the only reliable way to force that
+        // rebinding on mobile Chrome — otherwise the context stays latched
+        // to the output that was default when it was created, and audio
+        // keeps coming out of the phone speaker after BT connects.
+        await this._bindSinkToDefault();
+        if (navigator.mediaDevices && typeof navigator.mediaDevices.addEventListener === 'function') {
+            navigator.mediaDevices.addEventListener('devicechange', () => {
+                this._bindSinkToDefault();
+            });
+        }
     }
 
     /**
@@ -221,6 +234,31 @@ class AudioEngine {
     async resume() {
         if (this.audioCtx && this.audioCtx.state === 'suspended') {
             await this.audioCtx.resume();
+        }
+        // Also re-bind the sink after resume — the default output may have
+        // changed while the context was suspended (e.g. user connected BT
+        // while the tab was hidden).
+        await this._bindSinkToDefault();
+    }
+
+    /**
+     * Rebind the AudioContext's output sink to the current system default.
+     * No-op on browsers that don't implement `AudioContext.setSinkId`.
+     *
+     * Pass empty string `''` per the spec to mean "follow default output".
+     * Failures are logged but not thrown — the context continues to work
+     * on whichever sink it was already bound to.
+     *
+     * @private
+     */
+    async _bindSinkToDefault() {
+        if (!this.audioCtx) return;
+        if (typeof this.audioCtx.setSinkId !== 'function') return;
+        try {
+            await this.audioCtx.setSinkId('');
+            console.log('[audio-engine] Bound output to system default sink');
+        } catch (e) {
+            console.warn('[audio-engine] setSinkId failed:', e?.message || e);
         }
     }
 

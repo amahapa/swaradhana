@@ -76,10 +76,24 @@ function _ensureSilentAudio() {
     audio.src = _silentUrl;
     audio.preload = 'auto';
     audio.setAttribute('playsinline', ''); // iOS requirement
-    audio.volume = 0.001;                  // effectively silent, still active
+    audio.volume = 0;                      // truly silent; muted-like, still counted as active
     audio.style.display = 'none';
     document.body.appendChild(audio);
     _silentAudioEl = audio;
+
+    // Follow system-default output so Bluetooth connect/disconnect migrates
+    // this stream. Paired with AudioContext.setSinkId on the audio-engine,
+    // it prevents the "sound from both phone and BT" bleed on Android.
+    if (typeof audio.setSinkId === 'function') {
+        audio.setSinkId('').catch(() => {});
+    }
+    if (navigator.mediaDevices && typeof navigator.mediaDevices.addEventListener === 'function') {
+        navigator.mediaDevices.addEventListener('devicechange', () => {
+            if (typeof audio.setSinkId === 'function') {
+                audio.setSinkId('').catch(() => {});
+            }
+        });
+    }
     return audio;
 }
 
