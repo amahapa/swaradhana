@@ -2792,7 +2792,7 @@ export function initUI(settings) {
   function startTimerDisplay() {
     _renderTimer(); // immediate tick
     if (timerInterval) clearInterval(timerInterval);
-    timerInterval = setInterval(_renderTimer, 1000);
+    timerInterval = setInterval(_renderTimer, 2000);
   }
   function stopTimerDisplay() {
     if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }

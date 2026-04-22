@@ -254,7 +254,7 @@ export class SampleTanpuraEngine {
         this._bandpassMix.connect(this._combDelay);
 
         // Five parallel bandpass filters tuned on each _attachNewSource call.
-        this._bandpass = [2, 3, 4, 5, 7].map(() => {
+        this._bandpass = [2, 3, 5].map(() => {
             const bp = ctx.createBiquadFilter();
             bp.type = 'bandpass';
             bp.Q.value = 25;
@@ -270,7 +270,7 @@ export class SampleTanpuraEngine {
     _retuneBandpass() {
         if (!audioEngine.audioCtx || !this._bandpass.length) return;
         const ctx = audioEngine.audioCtx;
-        const harmonics = [2, 3, 4, 5, 7];
+        const harmonics = [2, 3, 5];
         const now = ctx.currentTime;
         this._bandpass.forEach((bp, i) => {
             const f = this._saFreq * harmonics[i];
@@ -410,7 +410,7 @@ export class SampleTanpuraEngine {
         this._bandpassMix.gain.value = 0.8;
         this._bandpassMix.connect(this._combDelay);
 
-        this._bandpass = [2, 3, 4, 5, 7].map(() => {
+        this._bandpass = [2, 3, 5].map(() => {
             const bp = ctx.createBiquadFilter();
             bp.type = 'bandpass';
             bp.Q.value = 25;

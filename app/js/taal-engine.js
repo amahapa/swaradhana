@@ -93,14 +93,14 @@ export class TaalEngine {
      * more resilience against garbage-collection pauses but adds latency.
      * @type {number}
      */
-    this._scheduleAheadTime = 0.1; // 100ms lookahead
+    this._scheduleAheadTime = 0.2; // 200ms lookahead
 
     /**
      * How often (in ms) the scheduler pump fires to check whether new beats
      * need to be scheduled.
      * @type {number}
      */
-    this._pumpInterval = 25; // 25ms
+    this._pumpInterval = 50; // 50ms
 
     /**
      * The audioContext.currentTime at which the next beat is scheduled.

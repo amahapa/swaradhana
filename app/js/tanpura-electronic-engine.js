@@ -30,8 +30,8 @@ import audioEngine from './audio-engine.js';
 import { SWAR_RATIOS, PRACTICE_DEFAULTS } from './config.js';
 import { getEffectiveSaFreq } from './music-engine.js';
 
-const SCHEDULER_INTERVAL_MS = 50;
-const SCHEDULE_AHEAD_S = 0.1;
+const SCHEDULER_INTERVAL_MS = 100;
+const SCHEDULE_AHEAD_S = 0.25;
 const ATTACK_TIME = 0.03;
 const PLUCK_OFFSETS = Object.freeze([0.0, 0.15, 0.30, 0.50]);
 const HUMANIZE_MAX_S = 0.03;
