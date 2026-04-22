@@ -147,15 +147,27 @@ class AudioEngine {
         this.tanpuraBusGain = this.audioCtx.createGain();
         this.tanpuraBusGain.gain.value = 0.8;
 
-        // A -> GainA -> PanA -> BusGain -> Compressor
+        // Soft-clip limiter on the tanpura bus. Concert mode sums two
+        // correlated engine instances (A + B with a ~4-cent detune), which
+        // can produce peaks above 1.0 when both the 1.5× headroom ceiling
+        // and equal-power balance contribute. A WaveShaper with a tanh
+        // curve gently rounds those peaks so they don't hit the downstream
+        // compressor as hard transients (the compressor is dynamic — too
+        // slow for instantaneous peak control).
+        this.tanpuraLimiter = this.audioCtx.createWaveShaper();
+        this.tanpuraLimiter.curve = this._buildTanhLimiterCurve(1.2);
+        this.tanpuraLimiter.oversample = '4x';
+
+        // A -> GainA -> PanA -> BusGain -> Limiter -> Compressor
         this.tanpuraGainA.connect(this.tanpuraPanA);
         this.tanpuraPanA.connect(this.tanpuraBusGain);
 
-        // B -> GainB -> PanB -> BusGain -> Compressor
+        // B -> GainB -> PanB -> BusGain -> Limiter -> Compressor
         this.tanpuraGainB.connect(this.tanpuraPanB);
         this.tanpuraPanB.connect(this.tanpuraBusGain);
 
-        this.tanpuraBusGain.connect(this.compressor);
+        this.tanpuraBusGain.connect(this.tanpuraLimiter);
+        this.tanpuraLimiter.connect(this.compressor);
 
         // ================================================================
         //  Swar synth node
@@ -183,10 +195,21 @@ class AudioEngine {
         this.tablaGain = this.audioCtx.createGain();
         this.tablaGain.gain.value = 0.7;
 
-        // Tabla -> BassEQ -> TrebleEQ -> TablaGain -> DryMix -> Master
+        // Soft-clip limiter on the tabla bus. Tabla bols have short, hard
+        // transients; a 1.5× loudness boost (see GAIN_BY_SET for tabla_c_1)
+        // plus occasional overlapping hits can sum above 1.0 at the
+        // destination and clip audibly ("cracking" / distortion). A
+        // WaveShaper with a gentle tanh curve rounds off those peaks with
+        // minimal audible artifact.
+        this.tablaLimiter = this.audioCtx.createWaveShaper();
+        this.tablaLimiter.curve = this._buildTanhLimiterCurve();
+        this.tablaLimiter.oversample = '4x';
+
+        // Tabla -> BassEQ -> TrebleEQ -> TablaGain -> Limiter -> DryMix -> Master
         this.tablaBassEQ.connect(this.tablaTrebleEQ);
         this.tablaTrebleEQ.connect(this.tablaGain);
-        this.tablaGain.connect(this.dryMix);
+        this.tablaGain.connect(this.tablaLimiter);
+        this.tablaLimiter.connect(this.dryMix);
 
         // ================================================================
         //  Auxiliary percussion nodes
@@ -251,6 +274,30 @@ class AudioEngine {
      *
      * @private
      */
+    /**
+     * Build a tanh-based soft-clip curve for a bus limiter.
+     * - Below ~0.7 input, output is nearly linear (no change to normal hits).
+     * - Above that, output curves asymptotically toward ±1 (peaks rounded
+     *   off gently instead of hard-clipping).
+     * - Output clamped to ±0.98 so the OS mixer never hits 0 dB, leaving
+     *   a sliver of headroom.
+     *
+     * @param {number} [k=1.5] - Curve stiffness. Higher = harder knee, more
+     *   audible colouration but tighter peak control. 1.2 is gentle
+     *   (tanpura — smoother transients); 1.5 is firmer (tabla — hard hits).
+     * @private
+     */
+    _buildTanhLimiterCurve(k = 1.5) {
+        const N = 2048;
+        const curve = new Float32Array(N);
+        const scale = Math.tanh(k);
+        for (let i = 0; i < N; i++) {
+            const x = (i / (N - 1)) * 2 - 1; // -1..+1
+            curve[i] = Math.tanh(k * x) / scale * 0.98;
+        }
+        return curve;
+    }
+
     async _bindSinkToDefault() {
         if (!this.audioCtx) return;
         if (typeof this.audioCtx.setSinkId !== 'function') return;
