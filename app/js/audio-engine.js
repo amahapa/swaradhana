@@ -102,6 +102,17 @@ class AudioEngine {
         // ---- Master output ----
         this.masterGain = this.audioCtx.createGain();
         this.masterGain.gain.value = 0.8;
+        // Master soft-clip limiter. Per-bus limiters (tabla, tanpura)                             
+        // clamp *their* peaks to ±0.98 each, but when multiple buses play                         
+        // simultaneously the sum at master can still exceed ±1.0 and                              
+        // clip audibly — especially on mobile speakers, which have less                           
+        // headroom than laptop outputs. A gentle tanh curve here catches                          
+        // the summed peaks.                                                                       
+        this.masterLimiter = this.audioCtx.createWaveShaper();                                     
+        this.masterLimiter.curve = this._buildTanhLimiterCurve(1.0);                               
+        this.masterLimiter.oversample = '4x';                                                      
+                                                                                                   
+        this.masterGain.connect(this.masterLimiter);               
         this.masterGain.connect(this.audioCtx.destination);
 
         // ---- Compressor ----
