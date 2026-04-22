@@ -1,0 +1,1318 @@
+/* ==========================================================================
+   Swaradhana — Component Library
+   Design: Deep indigo/amber palette. Modern, spacious, premium.
+   No borders on cards. Large touch targets. Smooth transitions.
+   Mobile-first responsive.
+   ========================================================================== */
+
+
+/* ==========================================================================
+   1. BUTTONS — Base
+   ========================================================================== */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 20px;
+  font-family: inherit;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease,
+              box-shadow 0.2s ease, transform 0.15s ease;
+  min-height: 44px;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--accent);
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+
+/* --------------------------------------------------------------------------
+   1a. Button Variants
+   -------------------------------------------------------------------------- */
+
+/* Primary — solid amber with dark text */
+.btn-primary {
+  background: var(--accent);
+  color: #0F1221;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.btn-primary:hover {
+  background: var(--accent-light);
+  border-color: var(--accent-light);
+  color: #0F1221;
+}
+
+.btn-primary:active {
+  background: var(--accent);
+}
+
+/* Active — amber glow outline */
+.btn-active {
+  background: var(--accent-glow);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Ghost — no border, no background, just text */
+.btn-ghost {
+  border: none;
+  background: transparent;
+  padding: 10px 16px;
+}
+
+.btn-ghost:hover {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+}
+
+/* Danger — error-red outline */
+.btn-danger {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.btn-danger:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: var(--error);
+  color: var(--error);
+}
+
+
+/* --------------------------------------------------------------------------
+   1b. Button Sizes
+   -------------------------------------------------------------------------- */
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  min-height: 36px;
+  border-radius: 8px;
+}
+
+.btn-lg {
+  padding: 14px 28px;
+  font-size: 1.1rem;
+  min-height: 56px;
+  border-radius: 16px;
+}
+
+/* Icon-only button — square, centered */
+.btn-icon {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+
+/* --------------------------------------------------------------------------
+   1c. Button Group — connected row of buttons
+   -------------------------------------------------------------------------- */
+
+.btn-group {
+  display: flex;
+  flex-direction: row;
+  gap: 4px;
+}
+
+.btn-group .btn {
+  border-radius: 0;
+}
+
+.btn-group .btn:first-child {
+  border-radius: 12px 0 0 12px;
+}
+
+.btn-group .btn:last-child {
+  border-radius: 0 12px 12px 0;
+}
+
+.btn-group .btn:only-child {
+  border-radius: 12px;
+}
+
+.btn-group .btn-active {
+  z-index: 1;
+}
+
+
+/* ==========================================================================
+   2. SLIDERS (range input)
+   Full custom styling for WebKit and Firefox
+   ========================================================================== */
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+  min-height: 44px;
+  padding: 19px 0;
+  background-clip: content-box;
+}
+
+/* WebKit track */
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+}
+
+/* WebKit thumb */
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  margin-top: -8px;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.12);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+}
+
+input[type="range"]:focus::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px var(--accent-glow), 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Firefox track */
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+  border: none;
+}
+
+/* Firefox thumb */
+input[type="range"]::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+}
+
+input[type="range"]::-moz-range-thumb:hover {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+}
+
+input[type="range"]:focus::-moz-range-thumb {
+  box-shadow: 0 0 0 4px var(--accent-glow), 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Firefox progress fill (amber fill from left) */
+input[type="range"]::-moz-range-progress {
+  background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+  height: 6px;
+  border-radius: 3px;
+}
+
+/* Inactive swar voice slider — greyed out when instrument not selected */
+input[type="range"].swar-slider-inactive {
+  opacity: 0.5 !important;
+}
+input[type="range"].swar-slider-inactive::-webkit-slider-thumb {
+  background: var(--text-dim) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+input[type="range"].swar-slider-inactive::-webkit-slider-runnable-track {
+  background: var(--bg-secondary) !important;
+}
+input[type="range"].swar-slider-inactive::-moz-range-thumb {
+  background: var(--text-dim) !important;
+  box-shadow: none !important;
+}
+input[type="range"].swar-slider-inactive::-moz-range-track {
+  background: var(--bg-secondary) !important;
+}
+input[type="range"].swar-slider-inactive::-moz-range-progress {
+  background: var(--bg-secondary) !important;
+}
+
+/* Slider container — label + slider + value, horizontal */
+.slider-container {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.slider-container label {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+  min-width: 80px;
+  flex-shrink: 0;
+}
+
+.slider-container input[type="range"] {
+  flex: 1;
+}
+
+.slider-container .slider-value {
+  font-size: 0.8125rem;
+  color: var(--accent);
+  font-weight: 600;
+  text-align: right;
+  min-width: 40px;
+  flex-shrink: 0;
+}
+
+/* Vertical slider — for mixer strips */
+.slider-vertical input[type="range"] {
+  transform: rotate(-90deg);
+  transform-origin: center center;
+}
+
+
+/* ==========================================================================
+   3. INSTRUMENT MIXER STRIP
+   ========================================================================== */
+
+.mixer-strip {
+  display: flex;
+  flex-direction: row;
+  gap: 0;
+  background: var(--bg-secondary);
+  border-radius: 16px;
+  overflow: hidden;
+  padding: 4px;
+}
+
+.mixer-channel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 16px;
+  flex: 1;
+  border-right: 1px solid var(--border);
+}
+
+.mixer-channel:last-child {
+  border-right: none;
+}
+
+.mixer-channel-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.mixer-mute {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: opacity 0.2s ease, color 0.2s ease, background 0.2s ease;
+  margin-top: 8px;
+  font-size: 0.85rem;
+}
+
+.mixer-mute:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.mixer-mute.muted {
+  opacity: 0.3;
+}
+
+.mixer-mute.muted ~ .mixer-channel-label {
+  text-decoration: line-through;
+  opacity: 0.3;
+}
+
+
+/* ==========================================================================
+   4. SECTION HEADERS
+   ========================================================================== */
+
+.section-label {
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+
+/* ==========================================================================
+   5. CARDS / PANELS (minimal, borderless)
+   ========================================================================== */
+
+.panel {
+  background: var(--bg-secondary);
+  border-radius: 16px;
+  padding: 20px;
+  margin-bottom: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+}
+
+.panel-header {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.panel-header h2,
+.panel-header h3,
+.panel-header h4 {
+  margin: 0;
+}
+
+
+/* ==========================================================================
+   6. MODAL / BOTTOM SHEET
+   ========================================================================== */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  animation: modalOverlayFadeIn 0.2s ease;
+}
+
+@keyframes modalOverlayFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.modal {
+  background: var(--bg-elevated);
+  border-radius: 24px 24px 0 0;
+  width: 100%;
+  max-height: 85vh;
+  overflow-y: auto;
+  animation: modalSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modalSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes modalFadeScale {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-header h2,
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.modal-body {
+  padding: 16px 24px;
+}
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+}
+
+.modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  color: var(--text-secondary);
+  font-size: 1.25rem;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.modal-close:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+/* Desktop modal — centered with rounded corners */
+@media (min-width: 768px) {
+  .modal-overlay {
+    align-items: center;
+    padding: 24px;
+  }
+
+  .modal {
+    max-width: 560px;
+    border-radius: 20px;
+    animation: modalFadeScale 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
+
+
+/* ==========================================================================
+   7. SETTINGS ROW
+   ========================================================================== */
+
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-row:last-child {
+  border-bottom: none;
+}
+
+/* Label styling — works with plain <label> or .settings-label */
+.settings-row > label,
+.settings-row .settings-label {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.settings-row .settings-label small {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+/* Make dropdowns and inputs inside settings-row full width */
+.settings-row .dropdown,
+.settings-row select,
+.settings-row .input-text {
+  width: 100%;
+}
+
+.settings-row .settings-control {
+  flex: 1;
+}
+
+/* Desktop: side-by-side layout */
+@media (min-width: 768px) {
+  .settings-row {
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .settings-row > label,
+  .settings-row .settings-label {
+    min-width: 120px;
+  }
+
+  .settings-row .dropdown,
+  .settings-row select {
+    width: auto;
+    min-width: 200px;
+  }
+}
+
+
+/* ==========================================================================
+   8. DROPDOWN (select)
+   ========================================================================== */
+
+.dropdown {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 36px 10px 14px;
+  font-family: inherit;
+  font-size: 0.9375rem;
+  cursor: pointer;
+  min-height: 44px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238B8FA3' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px 8px;
+}
+
+.dropdown:hover {
+  border-color: var(--accent);
+}
+
+.dropdown:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.dropdown option {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+
+/* ==========================================================================
+   9. TEXT INPUT
+   ========================================================================== */
+
+.input-text {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-family: inherit;
+  font-size: 0.9375rem;
+  line-height: 1.4;
+  width: 100%;
+  min-height: 44px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.input-text::placeholder {
+  color: var(--text-dim);
+}
+
+.input-text:hover {
+  border-color: var(--text-secondary);
+}
+
+.input-text:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.input-text:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Search input — with magnifying glass icon */
+.search-input {
+  position: relative;
+  width: 100%;
+}
+
+.search-input input {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px 10px 40px;
+  font-family: inherit;
+  font-size: 0.9375rem;
+  line-height: 1.4;
+  width: 100%;
+  min-height: 44px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.search-input input::placeholder {
+  color: var(--text-dim);
+}
+
+.search-input input:hover {
+  border-color: var(--text-secondary);
+}
+
+.search-input input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+/* Search icon (CSS magnifying glass) */
+.search-input::before {
+  content: '';
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--text-dim);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.search-input::after {
+  content: '';
+  position: absolute;
+  left: 24px;
+  top: 50%;
+  transform: translateY(-50%) rotate(45deg);
+  width: 2px;
+  height: 6px;
+  background: var(--text-dim);
+  margin-top: 5px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+
+/* ==========================================================================
+   10. PROGRESS BAR
+   ========================================================================== */
+
+.progress-bar {
+  height: 6px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+  border-radius: 3px;
+  transition: width 0.3s ease;
+  min-width: 0;
+}
+
+
+/* ==========================================================================
+   11. TOGGLE
+   ========================================================================== */
+
+.toggle {
+  position: relative;
+  display: inline-block;
+  width: 48px;
+  height: 26px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle .toggle-track {
+  width: 48px;
+  height: 26px;
+  border-radius: 13px;
+  background: var(--bg-tertiary);
+  transition: background 0.25s ease;
+  position: relative;
+}
+
+.toggle .toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #ffffff;
+  transition: transform 0.25s ease, background 0.25s ease;
+  pointer-events: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Toggle ON */
+.toggle input:checked + .toggle-track {
+  background: var(--accent);
+}
+
+.toggle input:checked + .toggle-track .toggle-thumb {
+  transform: translateX(22px);
+}
+
+/* Toggle focus ring */
+.toggle input:focus-visible + .toggle-track {
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+
+/* ==========================================================================
+   12. BEAT GRID
+   ========================================================================== */
+
+.beat-grid {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  padding: 8px 0;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Hide scrollbar but keep functionality */
+.beat-grid::-webkit-scrollbar {
+  height: 0;
+}
+
+.beat-cell {
+  min-width: 48px;
+  min-height: 64px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  cursor: default;
+  padding: 4px 6px;
+  scroll-snap-align: start;
+}
+
+.beat-cell .bol {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.3;
+}
+
+.beat-cell .marker {
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  font-weight: 700;
+}
+
+/* Sam — amber glow */
+.beat-cell.sam {
+  background: rgba(245, 166, 35, 0.15);
+  border-bottom: 3px solid var(--sam);
+}
+
+/* Tali — teal accent */
+.beat-cell.tali {
+  border-bottom: 3px solid var(--tali);
+}
+
+/* Khali — soft purple accent */
+.beat-cell.khali {
+  border-bottom: 3px solid var(--khali);
+}
+
+/* Current beat — pulsing highlight during playback */
+.beat-cell.current {
+  background: var(--accent-glow);
+  transform: scale(1.08);
+  box-shadow: 0 0 16px var(--accent-glow);
+}
+
+/* Vibhag separator */
+.vibhag-separator {
+  width: 2px;
+  background: var(--border);
+  align-self: stretch;
+  margin: 0 2px;
+  flex-shrink: 0;
+  border-radius: 1px;
+}
+
+
+/* ==========================================================================
+   13. SWARA DISPLAY
+   ========================================================================== */
+
+.swara {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+/* Komal — flattened swara */
+.swara.komal {
+  color: var(--komal);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Tivra — sharpened swara */
+.swara.tivra {
+  color: var(--tivra);
+  font-weight: 700;
+}
+
+/* Mandra saptak — lower octave comma */
+.swara.mandra::after {
+  content: ',';
+  font-size: 0.7em;
+  vertical-align: sub;
+  margin-left: 1px;
+}
+
+/* Taar saptak — upper octave apostrophe */
+.swara.taar::after {
+  content: "'";
+  font-size: 0.7em;
+  vertical-align: super;
+  margin-left: 1px;
+}
+
+
+/* ==========================================================================
+   14. COLLAPSIBLE
+   ========================================================================== */
+
+.collapsible {
+  border: none;
+  background: transparent;
+}
+
+.collapsible-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-family: inherit;
+  width: 100%;
+  text-align: left;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  min-height: 44px;
+}
+
+.collapsible-header:hover {
+  color: var(--accent);
+}
+
+.collapsible-arrow {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--text-secondary);
+  border-bottom: 2px solid var(--text-secondary);
+  transform: rotate(-45deg);
+  transition: transform 0.25s ease;
+  flex-shrink: 0;
+}
+
+.collapsible.expanded .collapsible-arrow {
+  transform: rotate(45deg);
+}
+
+.collapsible-content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+}
+
+.collapsible.expanded .collapsible-content {
+  max-height: 2000px;
+}
+
+
+/* ==========================================================================
+   15. INSTRUMENT QUICK CONTROLS
+   ========================================================================== */
+
+.instrument-quick-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.instrument-quick-controls input[type="range"] {
+  flex: 1;
+  min-height: 36px;
+}
+
+.instrument-quick-controls .btn {
+  border: none;
+  background: transparent;
+  min-height: 36px;
+  padding: 4px 8px;
+}
+
+.instrument-quick-controls .btn.muted {
+  opacity: 0.3;
+}
+
+
+/* ==========================================================================
+   16. TAGS / PILLS
+   ========================================================================== */
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-tertiary);
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  gap: 4px;
+  transition: background 0.2s ease, color 0.2s ease;
+  cursor: default;
+}
+
+.tag:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.tag .tag-label {
+  color: var(--text-dim);
+  font-size: 0.7rem;
+}
+
+
+/* ==========================================================================
+   17. TRANSPORT CONTROLS
+   ========================================================================== */
+
+.transport-bar {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  padding: 16px 0;
+}
+
+.transport-bar .btn {
+  flex: 1;
+  max-width: 160px;
+}
+
+
+/* ==========================================================================
+   18. BADGE
+   ========================================================================== */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+  border-radius: 12px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+/* Default: amber on dark */
+.badge-accent {
+  background: var(--accent);
+  color: #0F1221;
+}
+
+.badge-teal {
+  background: var(--tali);
+  color: #0F1221;
+}
+
+.badge-komal {
+  background: var(--komal);
+  color: #0F1221;
+}
+
+.badge-success {
+  background: var(--success);
+  color: #0F1221;
+}
+
+.badge-error {
+  background: var(--error);
+  color: #ffffff;
+}
+
+
+/* ==========================================================================
+   RESPONSIVE — Mobile-first adjustments
+   ========================================================================== */
+
+@media (max-width: 767px) {
+  /* Modal footer stacks buttons */
+  .modal-footer {
+    flex-direction: column;
+  }
+
+  .modal-footer .btn {
+    width: 100%;
+  }
+
+  /* Transport buttons go full-width */
+  .transport-bar {
+    flex-wrap: wrap;
+  }
+
+  .transport-bar .btn {
+    max-width: none;
+  }
+
+  /* Beat cells slightly larger for touch */
+  .beat-cell {
+    min-width: 52px;
+    min-height: 68px;
+  }
+
+  /* Settings rows already column on mobile by default */
+
+  /* Mixer strip wraps on very small screens */
+  .mixer-strip {
+    flex-wrap: wrap;
+  }
+
+  .mixer-channel {
+    min-width: 80px;
+  }
+}
+
+@media (min-width: 768px) {
+  /* Larger beat cells on desktop */
+  .beat-cell {
+    min-width: 56px;
+    min-height: 72px;
+  }
+
+  /* Panel gets more breathing room */
+  .panel {
+    padding: 24px;
+  }
+}
+
+
+/* ==========================================================================
+   19. TAAL VARIATION TABLE
+   ========================================================================== */
+
+.taal-table { width: 100%; border-collapse: separate; border-spacing: 4px; }
+.taal-table-row { display: flex; gap: 4px; margin-bottom: 4px; }
+.vibhag-marker {
+  min-width: 28px; display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 0.85rem; border-radius: 6px;
+}
+.vibhag-marker.sam { background: rgba(245,166,35,0.2); color: var(--accent); }
+.vibhag-marker.tali { background: rgba(78,205,196,0.15); color: var(--tali); }
+.vibhag-marker.khali { background: rgba(123,140,222,0.15); color: var(--khali); }
+
+.matra-cell {
+  flex: 1; min-height: 48px; background: var(--bg-tertiary); border-radius: 8px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 4px; position: relative; cursor: default;
+  border: 2px solid transparent; transition: border-color 0.15s;
+}
+.matra-cell .matra-num { font-size: 0.6rem; color: var(--text-dim); position: absolute; top: 2px; left: 6px; }
+.matra-cell .matra-bols { font-size: 0.85rem; color: var(--text-primary); font-weight: 500; text-align: center; }
+.matra-cell .matra-bols.multi-2 { font-size: 0.75rem; }
+.matra-cell .matra-bols.multi-3 { font-size: 0.65rem; }
+.matra-cell .matra-bols.multi-4 { font-size: 0.6rem; }
+
+/* Beat type tints — subtle background on structural beats */
+.matra-cell.beat-sam { background: rgba(245, 166, 35, 0.12); }
+.matra-cell.beat-tali { background: rgba(78, 205, 196, 0.10); }
+.matra-cell.beat-khali { background: rgba(123, 140, 222, 0.10); }
+
+/* Playing highlight overrides beat tints */
+.matra-cell.playing { background: var(--accent); }
+
+/* Editor mode */
+.matra-cell.editable { cursor: pointer; }
+.matra-cell.editable:hover { border-color: var(--text-dim); }
+.matra-cell.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+
+/* Bol palette */
+.bol-palette { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 0; }
+.bol-palette .bol-btn {
+  min-width: 44px; height: 36px; border-radius: 8px; border: 1px solid var(--border, #333);
+  background: var(--bg-tertiary); color: var(--text-primary); font-size: 0.8rem;
+  font-weight: 500; cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.bol-palette .bol-btn:active { background: var(--accent); color: var(--bg-primary); }
+
+/* Bol chips (for selected matra in edit mode) */
+.bol-chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 36px; padding: 8px 0; }
+.bol-chip {
+  display: flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 16px;
+  background: var(--accent); color: var(--bg-primary); font-size: 0.8rem; font-weight: 600; cursor: pointer;
+}
+.bol-chip .chip-remove { font-size: 0.7rem; opacity: 0.7; }
+
+/* Variation list item */
+.variation-item {
+  display: flex; align-items: center; padding: 12px 8px; border-bottom: 1px solid var(--border, #333);
+  cursor: pointer; border-radius: 8px; margin-bottom: 2px;
+}
+.variation-item.active { background: var(--accent-glow); border-left: 3px solid var(--accent); }
+.variation-item .var-name { flex: 1; font-weight: 500; color: var(--text-primary); }
+.variation-item .var-actions { display: flex; gap: 6px; }
+
+/* Variation dropdown on main screen */
+.taal-variation-select {
+  background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border, #333);
+  border-radius: 6px; padding: 2px 6px; font-size: 0.75rem; font-family: inherit;
+  cursor: pointer; outline: none; max-width: 100%; margin-top: 2px;
+}
+.taal-variation-select option {
+  background: var(--bg-tertiary); color: var(--text-primary);
+}
+
+/* Editor action bar */
+.editor-action-bar {
+  display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 0;
+}
+.editor-action-bar .btn { flex: 0 0 auto; }
+
+
+/* ==========================================================================
+   20. EXERCISE SYSTEM
+   ========================================================================== */
+
+/* Exercise preview tables */
+.ex-cycle-label {
+  font-size: 0.75rem; color: var(--text-dim); margin: 8px 0 4px;
+  font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+}
+
+/* Exercise player highlight */
+.matra-cell.playing {
+  background: var(--accent);
+  color: var(--bg-primary);
+}
+.matra-cell.playing .matra-bols {
+  color: var(--bg-primary);
+}
+.matra-cell.playing .matra-num {
+  color: rgba(15, 18, 33, 0.5);
+}
+
+/* Profile page — bar-chart strips */
+.profile-chart {
+  display: flex; align-items: flex-end; gap: 2px;
+  height: 88px; padding: 4px; background: var(--bg-secondary);
+  border-radius: 6px; overflow: hidden;
+}
+.profile-chart .bar {
+  flex: 1 1 auto; min-width: 3px; max-width: 20px;
+  position: relative; display: flex; flex-direction: column; justify-content: flex-end;
+  cursor: pointer;
+}
+.profile-chart .bar-app {
+  background: var(--bg-tertiary); border-radius: 2px;
+  width: 100%;
+}
+.profile-chart .bar-ex {
+  background: var(--accent); border-radius: 2px;
+  width: 100%;
+  position: absolute; left: 0; right: 0; bottom: 0;
+}
+.profile-chart .bar.empty { opacity: 0.25; }
+.profile-chart .bar:hover .bar-app { filter: brightness(1.2); }
+.profile-chart .bar-label {
+  position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+  background: var(--bg-primary); color: var(--text-primary);
+  font-size: 0.7rem; padding: 3px 6px; border-radius: 4px;
+  white-space: nowrap; pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  display: none; z-index: 10;
+}
+.profile-chart .bar:hover .bar-label,
+.profile-chart .bar:focus .bar-label { display: block; }
+
+/* Exercise list item — indented + lighter under a taal-group header */
+.exercise-item {
+  display: flex; align-items: center; padding: 8px 8px 8px 20px;
+  border-bottom: 1px solid var(--border, #333);
+  cursor: pointer; border-radius: 6px; margin-bottom: 1px;
+}
+.exercise-item.active {
+  background: var(--accent-glow); border-left: 3px solid var(--accent);
+}
+.exercise-item .ex-info { flex: 1; min-width: 0; }
+.exercise-item .ex-name { font-size: 0.85rem; font-weight: 400; color: var(--text-secondary, var(--text-primary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.exercise-item .ex-meta { font-size: 0.7rem; color: var(--text-dim); margin-top: 1px; }
+.exercise-item .ex-actions { display: flex; gap: 4px; }
+.exercise-item .ex-actions .btn { font-size: 0.7rem; padding: 3px 8px; }
