@@ -95,8 +95,8 @@ class AudioEngine {
         }
 
         this.audioCtx = new AudioContext({
-            sampleRate: 48000,
-            latencyHint: 'interactive',
+            sampleRate: 44100,
+            latencyHint: 'playback',
         });
 
         // ---- Master output ----
@@ -126,7 +126,7 @@ class AudioEngine {
 
         // ---- Reverb (convolution with synthetic IR) ----
         this.reverb = this.audioCtx.createConvolver();
-        this.reverb.buffer = this._generateReverbIR(2, 3);
+        this.reverb.buffer = this._generateReverbIR(1, 3);
 
         // Wet path: Compressor -> Reverb -> MasterGain
         this.compressor.connect(this.reverb);
