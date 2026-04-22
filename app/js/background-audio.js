@@ -37,35 +37,53 @@ let _wakeLock = null;
 const _activeSources = new Set();
 
 // ------------------------------------------------------------------
-// Silent WAV generator — ~8 KB, one second, mono 8-bit PCM at 8 kHz.
-// Mime-typed so the <audio> element accepts it.
+// Silent WAV generator — 30-second stereo 16-bit at 44.1 kHz.
+// A longer loop reduces loop-boundary glitches on mobile (~once every
+// 30 s instead of once per second). 16-bit @ 44.1 kHz stereo is the
+// most compatible format across browsers + BT codecs.
+// ~5 MB Blob but held only in memory; released by revokeObjectURL on
+// deactivate if needed.
 // ------------------------------------------------------------------
 function _buildSilentWavUrl() {
-    const sampleRate = 8000;
-    const numSamples = sampleRate; // 1 second
-    const buffer = new ArrayBuffer(44 + numSamples);
+    const sampleRate = 44100;
+    const channels = 2;
+    const bitsPerSample = 16;
+    const seconds = 30;
+    const blockAlign = channels * bitsPerSample / 8; // 4 bytes per frame
+    const dataBytes = sampleRate * seconds * blockAlign;
+    const buffer = new ArrayBuffer(44 + dataBytes);
     const view = new DataView(buffer);
     const writeStr = (offset, str) => {
         for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
     };
     writeStr(0, 'RIFF');
-    view.setUint32(4, 36 + numSamples, true);
+    view.setUint32(4, 36 + dataBytes, true);
     writeStr(8, 'WAVE');
     writeStr(12, 'fmt ');
     view.setUint32(16, 16, true);          // fmt chunk size
     view.setUint16(20, 1, true);           // PCM format
-    view.setUint16(22, 1, true);           // mono
+    view.setUint16(22, channels, true);
     view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate, true);  // byte rate (sr * blockAlign)
-    view.setUint16(32, 1, true);           // block align
-    view.setUint16(34, 8, true);           // bits per sample
+    view.setUint32(28, sampleRate * blockAlign, true); // byte rate
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitsPerSample, true);
     writeStr(36, 'data');
-    view.setUint32(40, numSamples, true);
-    // Samples are all zero (silent) — ArrayBuffer defaults to zeros.
-    // 8-bit unsigned PCM silent is actually 128; fill that in.
-    const data = new Uint8Array(buffer, 44);
-    data.fill(128);
+    view.setUint32(40, dataBytes, true);
+    // 16-bit signed PCM silent = 0; ArrayBuffer already zero-initialised.
     return URL.createObjectURL(new Blob([buffer], { type: 'audio/wav' }));
+}
+
+let _deviceChangeTimer = null;
+function _debouncedRebindSink(audio) {
+    // Browsers sometimes fire devicechange multiple times rapidly. Coalesce
+    // to a single setSinkId call ~500ms after the last event to avoid
+    // audible glitches from repeated rebinds.
+    clearTimeout(_deviceChangeTimer);
+    _deviceChangeTimer = setTimeout(() => {
+        if (typeof audio.setSinkId === 'function') {
+            audio.setSinkId('').catch(() => {});
+        }
+    }, 500);
 }
 
 function _ensureSilentAudio() {
@@ -76,23 +94,19 @@ function _ensureSilentAudio() {
     audio.src = _silentUrl;
     audio.preload = 'auto';
     audio.setAttribute('playsinline', ''); // iOS requirement
-    audio.volume = 0;                      // truly silent; muted-like, still counted as active
+    audio.muted = true;                    // belt + suspenders — inaudible even if volume slips
+    audio.volume = 0;
     audio.style.display = 'none';
     document.body.appendChild(audio);
     _silentAudioEl = audio;
 
     // Follow system-default output so Bluetooth connect/disconnect migrates
-    // this stream. Paired with AudioContext.setSinkId on the audio-engine,
-    // it prevents the "sound from both phone and BT" bleed on Android.
+    // this stream. Debounced to avoid chattering on stray devicechange events.
     if (typeof audio.setSinkId === 'function') {
         audio.setSinkId('').catch(() => {});
     }
     if (navigator.mediaDevices && typeof navigator.mediaDevices.addEventListener === 'function') {
-        navigator.mediaDevices.addEventListener('devicechange', () => {
-            if (typeof audio.setSinkId === 'function') {
-                audio.setSinkId('').catch(() => {});
-            }
-        });
+        navigator.mediaDevices.addEventListener('devicechange', () => _debouncedRebindSink(audio));
     }
     return audio;
 }
@@ -128,37 +142,53 @@ async function _releaseWakeLock() {
 }
 
 /**
- * Register a playing source. The silent track starts on the first activate
- * and keeps running until every activate has been balanced by a deactivate.
- *
- * @param {string} source - Stable key for the caller ('tanpura' | 'tabla' | 'exercise' | ...)
+ * Start/stop the silent keep-alive track based on tab visibility + active
+ * sources. Rules:
+ *   - Silent loop plays ONLY when (tab is hidden) AND (at least one source
+ *     is registered). Chrome doesn't suspend visible tabs, so the silent
+ *     loop is unnecessary during foreground use — and on some phone
+ *     speakers, a continuously-active-but-silent audio stream creates
+ *     faint switching/crackle in the class-D amp.
+ *   - Wake Lock is held whenever a source is registered, regardless of
+ *     visibility — it's what keeps the screen from sleeping mid-practice.
+ *   - MediaSession state mirrors the "any source active?" flag.
+ */
+function _syncSilentPlayback() {
+    if (!_silentAudioEl) return;
+    const shouldPlay = _activeSources.size > 0 && document.visibilityState === 'hidden';
+    if (shouldPlay && _silentAudioEl.paused) {
+        _silentAudioEl.play().catch(() => {});
+    } else if (!shouldPlay && !_silentAudioEl.paused) {
+        try {
+            _silentAudioEl.pause();
+            _silentAudioEl.currentTime = 0;
+        } catch (_) {}
+    }
+}
+
+/**
+ * Register a playing source. Wake Lock + MediaSession kick in immediately.
+ * The silent keep-alive track only starts if the tab is currently hidden.
  */
 async function activate(source = 'generic') {
     const wasEmpty = _activeSources.size === 0;
     _activeSources.add(source);
     if (!wasEmpty) return; // already active
 
-    const audio = _ensureSilentAudio();
-    try {
-        await audio.play();
-    } catch (e) {
-        console.warn('[background-audio] Silent audio play() rejected:', e?.message || e);
-    }
+    _ensureSilentAudio();            // create the element so it's ready
     _setupMediaSession();
     await _requestWakeLock();
+    _syncSilentPlayback();           // play silent loop only if tab is hidden
 }
 
 /**
- * Balance an earlier `activate(source)`. Silent track + wake lock stay
- * active if any other source is still registered.
+ * Balance an earlier `activate(source)`.
  */
 async function deactivate(source = 'generic') {
     _activeSources.delete(source);
-    if (_activeSources.size > 0) return;
+    if (_activeSources.size > 0) { _syncSilentPlayback(); return; }
 
-    if (_silentAudioEl) {
-        try { _silentAudioEl.pause(); } catch (_) {}
-    }
+    _syncSilentPlayback();           // will stop the loop (no active sources)
     if ('mediaSession' in navigator) {
         try { navigator.mediaSession.playbackState = 'none'; } catch (_) {}
     }
@@ -181,16 +211,17 @@ function setTitle(title, extras = {}) {
 }
 
 // ------------------------------------------------------------------
-// Re-acquire wake lock + resume silent audio when the tab becomes visible
-// again (wake locks are auto-released on hide, silent audio may be paused).
+// React to visibility changes:
+//   hidden  → start silent keep-alive (if any source is active) to prevent
+//             Chrome from suspending the tab.
+//   visible → re-acquire wake lock, stop silent keep-alive so the phone
+//             speaker isn't driven by a dummy stream during foreground use.
 // ------------------------------------------------------------------
 document.addEventListener('visibilitychange', async () => {
-    if (document.visibilityState !== 'visible') return;
-    if (_activeSources.size === 0) return;
-    await _requestWakeLock();
-    if (_silentAudioEl && _silentAudioEl.paused) {
-        try { await _silentAudioEl.play(); } catch (_) {}
+    if (document.visibilityState === 'visible') {
+        if (_activeSources.size > 0) await _requestWakeLock();
     }
+    _syncSilentPlayback();
 });
 
 const backgroundAudio = { activate, deactivate, setTitle };
