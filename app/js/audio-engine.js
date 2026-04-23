@@ -171,7 +171,7 @@ class AudioEngine {
         this.tanpuraGainB.connect(this.tanpuraPanB);
         this.tanpuraPanB.connect(this.tanpuraBusGain);
 
-        this.tanpuraBusGain.connect(this.compressor);
+        this.tanpuraBusGain.connect(this.masterGain);
 
         // ================================================================
         //  Swar synth node
