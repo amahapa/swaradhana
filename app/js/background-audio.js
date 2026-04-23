@@ -157,7 +157,7 @@ function _syncSilentPlayback() {
     const shouldPlay = _activeSources.size > 0 && document.visibilityState === 'hidden';
     if (shouldPlay) {
         const audio = _ensureSilentAudio();
-        _if (audio.paused) audio.play().catch(() => {});
+        if (audio.paused) audio.play().catch(() => {});
     } else if (_silentAudioEl && !_silentAudioEl.paused) {
         try {
             _silentAudioEl.pause();
