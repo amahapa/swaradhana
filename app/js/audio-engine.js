@@ -1,49 +1,70 @@
 /**
  * @fileoverview Master audio engine for Swaradhana.
  *
- * Creates and manages the Web Audio API {@link AudioContext} and the full
- * signal chain.  Individual instrument modules (tanpura.js, tabla.js,
- * swar-synth.js, etc.) do NOT create their own contexts — they connect to
- * the nodes exposed here via {@link AudioEngine#getInputNode}.
+ * Owns the Web Audio `AudioContext` and the shared graph nodes every
+ * instrument connects to. Instruments (tanpura engines, tabla, swar synth)
+ * do NOT create their own contexts — they ask the engine for a destination
+ * node and connect to it.
  *
- * Signal chain (see docs/audio_engine.md):
+ * ## Signal chain
  *
- *   Tanpura A -> GainA -> PanA -\
- *   Tanpura B -> GainB -> PanB --> Compressor -> Reverb -> MasterGain -> Destination
- *   Swar     -> SwarGain ------/
+ * ```
+ *                                 ┌── Compressor → Reverb ─┐
+ * Swar synth ──── SwarGain ──────┤                        │
+ * Manjira    ──── ManjiraGain  ──┤                        │
+ * Ghungroo   ──── GhungrooGain ──┘                        │
+ *                                                         ├──► MasterGain ──► destination
+ * Tabla      ──── BassEQ → TrebleEQ → TablaGain → DryMix ─┤
+ * Kartaal    ──── KartaalGain ───────────────────► DryMix ─┤
+ *                                                         │
+ * Tanpura (single mode)  ────────────────────────────────► │   (bypasses compressor + reverb + A/B bus;
+ *                                                         │    per-engine outputGain connects directly
+ *                                                         │    to MasterGain for lowest mobile CPU load)
+ *                                                         │
+ * Tanpura A  ── tanpuraGainA → panA ─┐                    │
+ * Tanpura B  ── tanpuraGainB → panB ─┴── tanpuraBusGain ──┘   (concert mode only — two engines +
+ *                                                              equal-power balance + wide pan)
+ * ```
  *
- *   Tabla -> BassEQ -> TrebleEQ -> TablaGain -> DryMix -> MasterGain -> Destination
- *   Kartaal -> KartaalGain                   -> DryMix
+ * ## Tanpura routing rules
  *
- *   Manjira  -> ManjiraGain  -> Reverb -> MasterGain
- *   Ghungroo -> GhungrooGain -> Reverb -> MasterGain
+ * The tanpura bypasses the compressor + reverb on the master chain. The
+ * drone is self-sustaining with controlled amplitude — neither node adds
+ * much musically — and convolution reverb is the most expensive continuous
+ * node in the graph on mobile CPUs. Keeping the tanpura path short is the
+ * main win for battery-friendly mobile playback.
+ *
+ * In **single mode** (concert off) the active tanpura engine's outputGain
+ * connects **directly to masterGain** — no A/B panning, no balance stage.
+ *
+ * In **concert mode** two engine instances play simultaneously and connect
+ * to `tanpuraGainA` / `tanpuraGainB` respectively. Those buses go through
+ * pan (±0.7), merge at `tanpuraBusGain`, and then hit masterGain.
  *
  * @module audio-engine
  */
 
 /**
- * Master audio engine — singleton.
- *
- * The constructor intentionally does **not** create an {@link AudioContext}
- * because browsers require a user gesture before audio can start.  Call
- * {@link AudioEngine#init} from within a click / tap handler.
+ * Singleton audio engine. The constructor does NOT create the
+ * AudioContext — browsers require a user gesture before audio can start.
+ * Call {@link AudioEngine#init} from a click/tap handler.
  */
 class AudioEngine {
     constructor() {
         /** @type {AudioContext|null} */
         this.audioCtx = null;
 
-        // ---- Master chain ----
+        // Master chain
         /** @type {GainNode|null} */
         this.masterGain = null;
-        /** @type {DynamicsCompressorNode|null} */
+        /** @type {DynamicsCompressorNode|null} Used by swar + auxiliary percussion, NOT tanpura/tabla. */
         this.compressor = null;
-        /** @type {ConvolverNode|null} */
+        /** @type {ConvolverNode|null} Synthetic 1-second room IR; wet for compressor branch. */
         this.reverb = null;
-        /** @type {GainNode|null} — dry path bypassing reverb */
+        /** @type {GainNode|null} Dry bus for tabla/kartaal (bypasses reverb). */
         this.dryMix = null;
 
-        // ---- Tanpura ----
+        // Tanpura — concert-mode A/B buses (see getInputNode('tanpuraA'|'tanpuraB'))
         /** @type {GainNode|null} */
         this.tanpuraGainA = null;
         /** @type {GainNode|null} */
@@ -52,8 +73,10 @@ class AudioEngine {
         this.tanpuraPanA = null;
         /** @type {StereoPannerNode|null} */
         this.tanpuraPanB = null;
+        /** @type {GainNode|null} Shared bus gain after balance stage. */
+        this.tanpuraBusGain = null;
 
-        // ---- Tabla ----
+        // Tabla
         /** @type {GainNode|null} */
         this.tablaGain = null;
         /** @type {BiquadFilterNode|null} */
@@ -61,11 +84,11 @@ class AudioEngine {
         /** @type {BiquadFilterNode|null} */
         this.tablaTrebleEQ = null;
 
-        // ---- Swar synth ----
+        // Swar synth
         /** @type {GainNode|null} */
         this.swarGain = null;
 
-        // ---- Auxiliary percussion ----
+        // Auxiliary percussion
         /** @type {GainNode|null} */
         this.manjiraGain = null;
         /** @type {GainNode|null} */
@@ -82,41 +105,58 @@ class AudioEngine {
     // ------------------------------------------------------------------
 
     /**
-     * Create the {@link AudioContext} and wire up the full signal chain.
-     *
-     * Must be called from inside a user-gesture handler (click / tap) to
-     * satisfy the browser autoplay policy.
+     * Create the AudioContext and wire up the shared graph. Must be called
+     * from a user-gesture handler.
      *
      * @returns {Promise<void>}
      */
     async init() {
-        if (this._initialized) {
-            return;
-        }
+        if (this._initialized) return;
 
+        // sampleRate 44100 matches every bundled MP3 — avoids continuous
+        //   resampling of buffer sources at runtime.
+        // latencyHint 'playback' asks the browser for larger audio buffers,
+        //   trading a few ms of latency for better immunity to main-thread
+        //   stalls on mobile. This is a practice app — real-time latency
+        //   isn't critical.
         this.audioCtx = new AudioContext({
             sampleRate: 44100,
             latencyHint: 'playback',
         });
 
-        // ---- Master output ----
+        this._buildMasterChain();
+        this._buildTanpuraBuses();
+        this._buildSwarBus();
+        this._buildTablaBuses();
+        this._buildAuxiliaryBuses();
+
+        this._initialized = true;
+    }
+
+    /**
+     * Resume the AudioContext if suspended. Safe to call from user-gesture
+     * handlers. No-op if already running.
+     */
+    async resume() {
+        if (this.audioCtx && this.audioCtx.state === 'suspended') {
+            await this.audioCtx.resume();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Chain builders (called once from init)
+    // ------------------------------------------------------------------
+
+    _buildMasterChain() {
+        // Master output — direct to destination, no limiter. With upstream
+        // gain caps there's already enough headroom that a soft-clip isn't
+        // needed, and a limiter adds continuous CPU load to the audio
+        // thread on mobile.
         this.masterGain = this.audioCtx.createGain();
         this.masterGain.gain.value = 0.8;
+        this.masterGain.connect(this.audioCtx.destination);
 
-        // Master soft-clip limiter. Per-bus limiters (tabla, tanpura)
-        // clamp *their* peaks to ±0.98 each, but when multiple buses play
-        // simultaneously the sum at master can still exceed ±1.0 and
-        // clip audibly — especially on mobile speakers, which have less
-        // headroom than laptop outputs. A gentle tanh curve here catches
-        // the summed peaks.
-        this.masterLimiter = this.audioCtx.createWaveShaper();
-        this.masterLimiter.curve = this._buildTanhLimiterCurve(1.0);
-        this.masterLimiter.oversample = '2x';
-
-        this.masterGain.connect(this.masterLimiter);
-        this.masterLimiter.connect(this.audioCtx.destination);
-
-        // ---- Compressor ----
+        // Compressor — used by swar synth + auxiliary percussion only.
         this.compressor = this.audioCtx.createDynamicsCompressor();
         this.compressor.threshold.value = -24;
         this.compressor.knee.value = 30;
@@ -124,26 +164,25 @@ class AudioEngine {
         this.compressor.attack.value = 0.003;
         this.compressor.release.value = 0.25;
 
-        // ---- Reverb (convolution with synthetic IR) ----
+        // Reverb — convolution with a synthetic room IR. 1-second tail
+        // keeps convolution cost reasonable on mobile.
         this.reverb = this.audioCtx.createConvolver();
         this.reverb.buffer = this._generateReverbIR(1, 3);
 
-        // Wet path: Compressor -> Reverb -> MasterGain
+        // Wet path: compressor → reverb → master
         this.compressor.connect(this.reverb);
         this.reverb.connect(this.masterGain);
 
-        // ---- Dry mix bus ---- (Tabla + Kartaal bypass reverb)
+        // Dry bus (tabla + kartaal bypass reverb).
         this.dryMix = this.audioCtx.createGain();
         this.dryMix.gain.value = 1.0;
         this.dryMix.connect(this.masterGain);
+    }
 
-        // ================================================================
-        //  Tanpura nodes
-        // ================================================================
-
-        // Per-bus A/B: acts as the concert-mode balance stage.
-        // Default equal-power balance @ 50%.
+    _buildTanpuraBuses() {
+        // Per-bus A/B gains (concert-mode balance stage, equal-power law).
         const halfRoot = Math.SQRT1_2; // cos(π/4) = sin(π/4)
+
         this.tanpuraGainA = this.audioCtx.createGain();
         this.tanpuraGainA.gain.value = halfRoot;
         this.tanpuraPanA = this.audioCtx.createStereoPanner();
@@ -154,38 +193,28 @@ class AudioEngine {
         this.tanpuraPanB = this.audioCtx.createStereoPanner();
         this.tanpuraPanB.pan.value = 0;
 
-        // Shared bus gain controls the overall tanpura loudness (main-page
-        // volume slider target).
+        // Shared bus gain after balance — main-page volume slider target.
         this.tanpuraBusGain = this.audioCtx.createGain();
         this.tanpuraBusGain.gain.value = 0.8;
 
-        // Per-bus limiter removed for mobile CPU headroom. The master
-        // limiter downstream catches any remaining peaks from the summed
-        // bus. The compressor + reverb also smooth tanpura-specific peaks.
-
-        // A -> GainA -> PanA -> BusGain -> Compressor
+        // Route: A → GainA → PanA → BusGain → masterGain
+        //        B → GainB → PanB → BusGain → masterGain
         this.tanpuraGainA.connect(this.tanpuraPanA);
         this.tanpuraPanA.connect(this.tanpuraBusGain);
-
-        // B -> GainB -> PanB -> BusGain -> Compressor
         this.tanpuraGainB.connect(this.tanpuraPanB);
         this.tanpuraPanB.connect(this.tanpuraBusGain);
+        this.tanpuraBusGain.connect(this.masterGain);
+        // In SINGLE mode the engine bypasses this entire chain and
+        // connects its outputGain directly to masterGain — see getInputNode.
+    }
 
-        this.tanpuraBusGain.connect(this.compressor);
-
-        // ================================================================
-        //  Swar synth node
-        // ================================================================
-
+    _buildSwarBus() {
         this.swarGain = this.audioCtx.createGain();
         this.swarGain.gain.value = 0.7;
-        // Swar -> SwarGain -> Compressor (-> Reverb -> Master)
         this.swarGain.connect(this.compressor);
+    }
 
-        // ================================================================
-        //  Tabla nodes
-        // ================================================================
-
+    _buildTablaBuses() {
         this.tablaBassEQ = this.audioCtx.createBiquadFilter();
         this.tablaBassEQ.type = 'lowshelf';
         this.tablaBassEQ.frequency.value = 200;
@@ -199,216 +228,75 @@ class AudioEngine {
         this.tablaGain = this.audioCtx.createGain();
         this.tablaGain.gain.value = 0.7;
 
-        // Per-bus limiter removed for mobile CPU headroom. Tabla peaks
-        // are handled by the master limiter downstream. To keep peaks
-        // well below clipping, the per-set GAIN_BY_SET multipliers in
-        // tabla-samples.js are kept ≤ 1.2 so velocity × setGain rarely
-        // exceeds 1.0 on typical bols.
-
-        // Tabla -> BassEQ -> TrebleEQ -> TablaGain -> DryMix -> Master
+        // Tabla → BassEQ → TrebleEQ → TablaGain → DryMix → master
         this.tablaBassEQ.connect(this.tablaTrebleEQ);
         this.tablaTrebleEQ.connect(this.tablaGain);
         this.tablaGain.connect(this.dryMix);
+    }
 
-        // ================================================================
-        //  Auxiliary percussion nodes
-        // ================================================================
-
-        // Manjira -> ManjiraGain -> Reverb -> Master
+    _buildAuxiliaryBuses() {
         this.manjiraGain = this.audioCtx.createGain();
         this.manjiraGain.gain.value = 0.5;
         this.manjiraGain.connect(this.reverb);
 
-        // Ghungroo -> GhungrooGain -> Reverb -> Master
         this.ghungrooGain = this.audioCtx.createGain();
         this.ghungrooGain.gain.value = 0.4;
         this.ghungrooGain.connect(this.reverb);
 
-        // Kartaal -> KartaalGain -> DryMix -> Master
         this.kartaalGain = this.audioCtx.createGain();
         this.kartaalGain.gain.value = 0.5;
         this.kartaalGain.connect(this.dryMix);
-
-        this._initialized = true;
-
-        // Follow the system default output (speaker / Bluetooth) so that
-        // connecting a BT device mid-session migrates Web Audio too.
-        // AudioContext.setSinkId is the only reliable way to force that
-        // rebinding on mobile Chrome — otherwise the context stays latched
-        // to the output that was default when it was created, and audio
-        // keeps coming out of the phone speaker after BT connects.
-        await this._bindSinkToDefault();
-        if (navigator.mediaDevices && typeof navigator.mediaDevices.addEventListener === 'function') {
-            // Debounce: some browsers fire devicechange repeatedly on a
-            // single real event; rebinding the sink on each call causes
-            // audible clicks.
-            let t = null;
-            navigator.mediaDevices.addEventListener('devicechange', () => {
-                clearTimeout(t);
-                t = setTimeout(() => this._bindSinkToDefault(), 500);
-            });
-        }
-    }
-
-    /**
-     * Resume the {@link AudioContext} if it is in a suspended state.
-     *
-     * Browsers suspend the context until a user gesture occurs.  Call this
-     * from a click / tap handler to ensure audio playback can begin.
-     *
-     * @returns {Promise<void>}
-     */
-    async resume() {
-        if (this.audioCtx && this.audioCtx.state === 'suspended') {
-            await this.audioCtx.resume();
-        }
-        // Also re-bind the sink after resume — the default output may have
-        // changed while the context was suspended (e.g. user connected BT
-        // while the tab was hidden).
-        await this._bindSinkToDefault();
-    }
-
-    /**
-     * Rebind the AudioContext's output sink to the current system default.
-     * No-op on browsers that don't implement `AudioContext.setSinkId`.
-     *
-     * Pass empty string `''` per the spec to mean "follow default output".
-     * Failures are logged but not thrown — the context continues to work
-     * on whichever sink it was already bound to.
-     *
-     * @private
-     */
-    /**
-     * Build a tanh-based soft-clip curve for a bus limiter.
-     * - Below ~0.7 input, output is nearly linear (no change to normal hits).
-     * - Above that, output curves asymptotically toward ±1 (peaks rounded
-     *   off gently instead of hard-clipping).
-     * - Output clamped to ±0.98 so the OS mixer never hits 0 dB, leaving
-     *   a sliver of headroom.
-     *
-     * @param {number} [k=1.5] - Curve stiffness. Higher = harder knee, more
-     *   audible colouration but tighter peak control. 1.2 is gentle
-     *   (tanpura — smoother transients); 1.5 is firmer (tabla — hard hits).
-     * @private
-     */
-    _buildTanhLimiterCurve(k = 1.5) {
-        const N = 2048;
-        const curve = new Float32Array(N);
-        const scale = Math.tanh(k);
-        for (let i = 0; i < N; i++) {
-            const x = (i / (N - 1)) * 2 - 1; // -1..+1
-            curve[i] = Math.tanh(k * x) / scale * 0.98;
-        }
-        return curve;
-    }
-
-    async _bindSinkToDefault() {
-        if (!this.audioCtx) return;
-        if (typeof this.audioCtx.setSinkId !== 'function') return;
-        try {
-            await this.audioCtx.setSinkId('');
-            console.log('[audio-engine] Bound output to system default sink');
-        } catch (e) {
-            console.warn('[audio-engine] setSinkId failed:', e?.message || e);
-        }
     }
 
     // ------------------------------------------------------------------
     // Read-only properties
     // ------------------------------------------------------------------
 
-    /**
-     * The high-resolution audio clock time, in seconds.
-     *
-     * @type {number}
-     */
+    /** High-resolution audio clock time in seconds. */
     get currentTime() {
         return this.audioCtx ? this.audioCtx.currentTime : 0;
     }
 
-    /**
-     * Whether {@link init} has been called successfully.
-     *
-     * @type {boolean}
-     */
+    /** Whether init() has completed. */
     get isInitialized() {
         return this._initialized;
     }
 
     // ------------------------------------------------------------------
-    // Volume / EQ setters
+    // Volume / balance / pan setters
     // ------------------------------------------------------------------
 
-    /**
-     * Set the master output volume.
-     *
-     * @param {number} value - Gain value in the range 0 – 1.
-     */
     setMasterVolume(value) {
-        if (this.masterGain) {
-            this.masterGain.gain.setTargetAtTime(
-                Math.max(0, Math.min(1, value)),
-                this.audioCtx.currentTime,
-                0.02
-            );
-        }
+        this._setGainSmooth(this.masterGain, value);
     }
 
-    /**
-     * Set the tabla bus volume.
-     *
-     * @param {number} value - Gain value in the range 0 – 1.
-     */
     setTablaVolume(value) {
-        if (this.tablaGain) {
-            this.tablaGain.gain.setTargetAtTime(
-                Math.max(0, Math.min(1, value)),
-                this.audioCtx.currentTime,
-                0.02
-            );
-        }
+        this._setGainSmooth(this.tablaGain, value);
     }
 
-    /**
-     * Adjust the tabla low-shelf (bass) EQ.
-     *
-     * @param {number} dB - Gain in decibels, clamped to -12 .. +12.
-     */
     setTablaBassEQ(dB) {
-        if (this.tablaBassEQ) {
-            this.tablaBassEQ.gain.setTargetAtTime(
-                Math.max(-12, Math.min(12, dB)),
-                this.audioCtx.currentTime,
-                0.02
-            );
-        }
+        if (!this.tablaBassEQ) return;
+        const clamped = Math.max(-12, Math.min(12, dB));
+        this.tablaBassEQ.gain.setTargetAtTime(clamped, this.audioCtx.currentTime, 0.02);
     }
 
-    /**
-     * Adjust the tabla high-shelf (treble) EQ.
-     *
-     * @param {number} dB - Gain in decibels, clamped to -12 .. +12.
-     */
     setTablaTrebleEQ(dB) {
-        if (this.tablaTrebleEQ) {
-            this.tablaTrebleEQ.gain.setTargetAtTime(
-                Math.max(-12, Math.min(12, dB)),
-                this.audioCtx.currentTime,
-                0.02
-            );
-        }
+        if (!this.tablaTrebleEQ) return;
+        const clamped = Math.max(-12, Math.min(12, dB));
+        this.tablaTrebleEQ.gain.setTargetAtTime(clamped, this.audioCtx.currentTime, 0.02);
+    }
+
+    setSwarVolume(value) {
+        this._setGainSmooth(this.swarGain, value);
     }
 
     /**
-     * Overall tanpura bus volume — the master knob surfaced on the
-     * main-page volume slider. Applies to both A and B equally.
+     * Overall tanpura loudness — target of the main-page volume slider.
+     * Accepts values above 1.0 for headroom (capped at 2.0).
      *
-     * Accepts values above 1.0 for headroom — the tanpura bus sits
-     * before the compressor and reverb, both of which attenuate the
-     * signal further, so unity at the gain node still ends up quieter
-     * than the tabla bus (which bypasses the reverb wet send).
-     *
-     * @param {number} value - Gain value in the range 0 – 2.
+     * Applies to the concert-mode A/B bus. In single mode, the engine
+     * connects directly to masterGain and this gain is unused; the
+     * controller reduces the engine's own outputGain instead.
      */
     setTanpuraBusVolume(value) {
         if (!this.tanpuraBusGain || !this.audioCtx) return;
@@ -417,8 +305,8 @@ class AudioEngine {
     }
 
     /**
-     * Concert-mode balance between Tanpura A and B, using an equal-power
-     * law so centre (50) keeps overall loudness unchanged.
+     * Concert-mode balance — equal-power L↔R fade between Tanpura A and B.
+     * Center (50) preserves overall loudness.
      *
      * @param {number} percent - 0 = all A (left), 50 = equal, 100 = all B (right).
      */
@@ -426,106 +314,65 @@ class AudioEngine {
         if (!this.tanpuraGainA || !this.tanpuraGainB || !this.audioCtx) return;
         const p = Math.max(0, Math.min(100, percent)) / 100;
         const t = this.audioCtx.currentTime;
-        // Equal-power crossfade: A = cos, B = sin of (p * π/2).
-        const a = Math.cos(p * Math.PI / 2);
-        const b = Math.sin(p * Math.PI / 2);
-        this.tanpuraGainA.gain.setTargetAtTime(a, t, 0.02);
-        this.tanpuraGainB.gain.setTargetAtTime(b, t, 0.02);
+        this.tanpuraGainA.gain.setTargetAtTime(Math.cos(p * Math.PI / 2), t, 0.02);
+        this.tanpuraGainB.gain.setTargetAtTime(Math.sin(p * Math.PI / 2), t, 0.02);
     }
 
     /**
-     * Legacy: set Tanpura A and B independently. Kept for backward
-     * compatibility; the UI now uses {@link setTanpuraBusVolume} and
-     * {@link setTanpuraBalance}.
-     */
-    setTanpuraVolume(a, b) {
-        const t = this.audioCtx ? this.audioCtx.currentTime : 0;
-        if (this.tanpuraGainA) {
-            this.tanpuraGainA.gain.setTargetAtTime(Math.max(0, Math.min(1, a)), t, 0.02);
-        }
-        if (this.tanpuraGainB) {
-            this.tanpuraGainB.gain.setTargetAtTime(Math.max(0, Math.min(1, b)), t, 0.02);
-        }
-    }
-
-    /**
-     * Configure tanpura stereo panning for concert or single mode.
+     * Configure tanpura stereo panning. In concert mode A sits left and B
+     * right; in single mode both pans are centered (single mode also
+     * bypasses the A/B chain so pan doesn't affect audio anyway).
      *
-     * In concert mode A is panned left and B right so the two tanpuras
-     * flank the singer/flute. In single mode A is centred.
-     *
-     * @param {boolean} concert - `true` for concert mode panning.
-     * @param {number} [intensity=0.7] - Pan magnitude (0..1).
+     * @param {boolean} concert - true = wide stereo placement
+     * @param {number}  [intensity=0.7] - pan magnitude (0..1)
      */
     setTanpuraPan(concert, intensity = 0.7) {
-        if (this.tanpuraPanA && this.tanpuraPanB && this.audioCtx) {
-            const t = this.audioCtx.currentTime;
-            const amt = Math.max(0, Math.min(1, intensity));
-            if (concert) {
-                this.tanpuraPanA.pan.setTargetAtTime(-amt, t, 0.02);
-                this.tanpuraPanB.pan.setTargetAtTime(+amt, t, 0.02);
-            } else {
-                this.tanpuraPanA.pan.setTargetAtTime(0, t, 0.02);
-                this.tanpuraPanB.pan.setTargetAtTime(0, t, 0.02);
-            }
-        }
+        if (!this.tanpuraPanA || !this.tanpuraPanB || !this.audioCtx) return;
+        const t = this.audioCtx.currentTime;
+        const amt = concert ? Math.max(0, Math.min(1, intensity)) : 0;
+        this.tanpuraPanA.pan.setTargetAtTime(-amt, t, 0.02);
+        this.tanpuraPanB.pan.setTargetAtTime(+amt, t, 0.02);
     }
 
-    /**
-     * Set the melodic swar synth volume.
-     *
-     * @param {number} value - Gain value in the range 0 – 1.
-     */
-    setSwarVolume(value) {
-        if (this.swarGain) {
-            this.swarGain.gain.setTargetAtTime(
-                Math.max(0, Math.min(1, value)),
-                this.audioCtx.currentTime,
-                0.02
-            );
-        }
+    _setGainSmooth(node, value) {
+        if (!node || !this.audioCtx) return;
+        const clamped = Math.max(0, Math.min(1, value));
+        node.gain.setTargetAtTime(clamped, this.audioCtx.currentTime, 0.02);
     }
 
     // ------------------------------------------------------------------
-    // Instrument connection point
+    // Instrument connection points
     // ------------------------------------------------------------------
 
     /**
-     * Return the {@link AudioNode} that an instrument module should
-     * connect its output to.
+     * Return the AudioNode an instrument should connect to. The tanpura
+     * controller picks the right identifier based on whether concert mode
+     * is on.
      *
-     * @param {'tanpuraA'|'tanpuraB'|'tabla'|'swar'|'manjira'|'ghungroo'|'kartaal'} instrument
-     *   Identifier of the instrument requesting a destination node.
-     * @returns {AudioNode} The appropriate input node for the instrument.
-     * @throws {Error} If the engine has not been initialised or the
-     *   instrument identifier is unknown.
+     * @param {'tanpura' | 'tanpuraA' | 'tanpuraB'
+     *       | 'tabla' | 'swar'
+     *       | 'manjira' | 'ghungroo' | 'kartaal'} id
+     * @returns {AudioNode}
      */
-    getInputNode(instrument) {
+    getInputNode(id) {
         if (!this._initialized) {
-            throw new Error(
-                '[AudioEngine] Not initialised. Call init() first.'
-            );
+            throw new Error('[AudioEngine] init() must be called first.');
         }
-
-        switch (instrument) {
-            case 'tanpuraA':
-                return this.tanpuraGainA;
-            case 'tanpuraB':
-                return this.tanpuraGainB;
-            case 'tabla':
-                return this.tablaBassEQ;
-            case 'swar':
-                return this.swarGain;
-            case 'manjira':
-                return this.manjiraGain;
-            case 'ghungroo':
-                return this.ghungrooGain;
-            case 'kartaal':
-                return this.kartaalGain;
+        switch (id) {
+            // Single mode — skip the A/B pan/gain stage, but still go
+            // through tanpuraBusGain so the main-page volume slider
+            // continues to work.
+            case 'tanpura':  return this.tanpuraBusGain;
+            // Concert mode — A/B balance + wide pan stage.
+            case 'tanpuraA': return this.tanpuraGainA;
+            case 'tanpuraB': return this.tanpuraGainB;
+            case 'tabla':    return this.tablaBassEQ;
+            case 'swar':     return this.swarGain;
+            case 'manjira':  return this.manjiraGain;
+            case 'ghungroo': return this.ghungrooGain;
+            case 'kartaal':  return this.kartaalGain;
             default:
-                throw new Error(
-                    `[AudioEngine] Unknown instrument: "${instrument}"`
-                );
+                throw new Error(`[AudioEngine] Unknown input id: "${id}"`);
         }
     }
 
@@ -534,60 +381,44 @@ class AudioEngine {
     // ------------------------------------------------------------------
 
     /**
-     * Generate a synthetic stereo room impulse response for the
-     * {@link ConvolverNode}.
-     *
-     * The IR simulates a warm practice room with early reflections in the
-     * first 50 ms followed by an exponentially decaying reverb tail.
-     * No external audio file is loaded.
+     * Build a stereo impulse response at runtime — no external audio file.
+     * Simulates a warm practice room: loud-ish random early reflections in
+     * the first 50 ms, exponentially-decaying noise tail, gentle 0.5 Hz
+     * modulation for a non-static feel.
      *
      * @private
-     * @param {number} [duration=2]  - Length of the IR in seconds.
-     * @param {number} [decay=3]     - Exponential decay factor (higher = faster decay).
-     * @returns {AudioBuffer} A stereo {@link AudioBuffer} containing the IR.
+     * @param {number} [duration=1] seconds
+     * @param {number} [decay=3]    exponential decay factor
+     * @returns {AudioBuffer}
      */
-    _generateReverbIR(duration = 2, decay = 3) {
+    _generateReverbIR(duration = 1, decay = 3) {
         const sampleRate = this.audioCtx.sampleRate;
         const length = Math.floor(sampleRate * duration);
         const buffer = this.audioCtx.createBuffer(2, length, sampleRate);
         const channelL = buffer.getChannelData(0);
         const channelR = buffer.getChannelData(1);
-
-        // Number of samples in the first 50 ms (early-reflection zone).
         const earlyReflectionSamples = Math.floor(sampleRate * 0.05);
 
         for (let i = 0; i < length; i++) {
             const t = i / sampleRate;
-
-            // --- Late reverb: exponentially decaying noise ---
             const envelope = Math.exp(-decay * t);
             let sampleL = (Math.random() * 2 - 1) * envelope;
             let sampleR = (Math.random() * 2 - 1) * envelope;
-
-            // --- Early reflections: louder random impulses in first 50 ms ---
             if (i < earlyReflectionSamples) {
                 const earlyGain = 0.5;
                 sampleL += (Math.random() * 2 - 1) * earlyGain;
                 sampleR += (Math.random() * 2 - 1) * earlyGain;
             }
-
-            // --- Subtle modulation for warmth ---
             const modulation = 1 + 0.02 * Math.sin(2 * Math.PI * 0.5 * t);
-            sampleL *= modulation;
-            sampleR *= modulation;
-
-            channelL[i] = sampleL;
-            channelR[i] = sampleR;
+            channelL[i] = sampleL * modulation;
+            channelR[i] = sampleR * modulation;
         }
-
         return buffer;
     }
 }
 
 /**
- * Singleton instance of the audio engine.
- *
- * Import this from any module that needs access to the audio graph:
+ * Singleton instance. Import from any module:
  * ```js
  * import audioEngine from './audio-engine.js';
  * await audioEngine.init();

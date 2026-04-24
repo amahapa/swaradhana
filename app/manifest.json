@@ -1,26 +1,32 @@
-{
-  "name": "Swaradhana - \u0938\u094d\u0935\u0930 \u0938\u093e\u0927\u0928\u093e",
-  "short_name": "Swaradhana",
-  "description": "Hindustani Classical Music Practice Companion for Bansuri",
-  "author": "Arun Mahapatro",
-  "start_url": "./",
-  "display": "standalone",
-  "background_color": "#0F1221",
-  "theme_color": "#F5A623",
-  "orientation": "portrait",
-  "icons": [
-    {
-      "src": "assets/icons/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "assets/icons/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
+<!DOCTYPE html>
+<html>
+<head><title>Beep Test</title></head>
+<body style="background:#0F1221; color:#E8ECF4; font-family:sans-serif; padding:40px; text-align:center;">
+  <h2>Simple Sound Test</h2>
+  <p>Click the button below. If you hear a beep, your browser audio works.</p>
+  <button onclick="beep()" style="padding:20px 40px; font-size:20px; cursor:pointer; border-radius:12px; background:#F5A623; color:#0F1221; border:none;">
+    BEEP
+  </button>
+  <p id="status" style="margin-top:20px; color:#9BA3B8;"></p>
+  <script>
+    function beep() {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.frequency.value = 440;
+        osc.type = 'sine';
+        gain.gain.value = 0.3;
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+        osc.stop(ctx.currentTime + 0.5);
+        document.getElementById('status').textContent = 'AudioContext state: ' + ctx.state + ' | Sample rate: ' + ctx.sampleRate;
+      } catch(e) {
+        document.getElementById('status').textContent = 'ERROR: ' + e.message;
+      }
     }
-  ],
-  "categories": ["music", "education"]
-}
+  </script>
+</body>
+</html>

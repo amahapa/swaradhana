@@ -1,32 +1,159 @@
 <!DOCTYPE html>
 <html>
-<head><title>Beep Test</title></head>
-<body style="background:#0F1221; color:#E8ECF4; font-family:sans-serif; padding:40px; text-align:center;">
-  <h2>Simple Sound Test</h2>
-  <p>Click the button below. If you hear a beep, your browser audio works.</p>
-  <button onclick="beep()" style="padding:20px 40px; font-size:20px; cursor:pointer; border-radius:12px; background:#F5A623; color:#0F1221; border:none;">
-    BEEP
-  </button>
-  <p id="status" style="margin-top:20px; color:#9BA3B8;"></p>
-  <script>
-    function beep() {
-      try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.frequency.value = 440;
-        osc.type = 'sine';
-        gain.gain.value = 0.3;
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
-        osc.stop(ctx.currentTime + 0.5);
-        document.getElementById('status').textContent = 'AudioContext state: ' + ctx.state + ' | Sample rate: ' + ctx.sampleRate;
-      } catch(e) {
-        document.getElementById('status').textContent = 'ERROR: ' + e.message;
-      }
+<head>
+  <title>Swaradhana Sound Test</title>
+  <style>
+    body { background: #0F1221; color: #E8ECF4; font-family: sans-serif; padding: 20px; }
+    button { padding: 12px 24px; margin: 8px; font-size: 16px; cursor: pointer; border-radius: 8px; border: 1px solid #F5A623; background: #1A1F36; color: #F5A623; }
+    button:hover { background: #242B45; }
+    #log { margin-top: 20px; padding: 12px; background: #1A1F36; border-radius: 8px; font-family: monospace; font-size: 13px; white-space: pre-wrap; max-height: 400px; overflow-y: auto; }
+  </style>
+</head>
+<body>
+  <h2>Swaradhana — Sound Test</h2>
+  <p>Click buttons to test each audio component. Check the log below for errors.</p>
+
+  <button id="btn-init">1. Init Audio Engine</button>
+  <button id="btn-tanpura">2. Test Tanpura</button>
+  <button id="btn-tabla">3. Test Tabla Bol</button>
+  <button id="btn-swar">4. Test Swar Note</button>
+  <button id="btn-session">5. Start Full Session</button>
+  <button id="btn-stop">6. Stop All</button>
+
+  <div id="log">Ready. Click "Init Audio Engine" first.</div>
+
+  <script type="module">
+    const logEl = document.getElementById('log');
+    function log(msg) {
+      const time = new Date().toLocaleTimeString();
+      logEl.textContent += `\n[${time}] ${msg}`;
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(msg);
     }
+
+    let audioEngine, tanpura, tabla, swarSynth, practiceSession;
+
+    try {
+      audioEngine = (await import('./js/audio-engine.js')).default;
+      log('✓ audio-engine.js loaded');
+    } catch (e) { log('✗ audio-engine.js FAILED: ' + e.message); }
+
+    try {
+      tanpura = (await import('./js/tanpura.js')).default;
+      log('✓ tanpura.js loaded');
+    } catch (e) { log('✗ tanpura.js FAILED: ' + e.message); }
+
+    try {
+      tabla = (await import('./js/tabla.js')).default;
+      log('✓ tabla.js loaded');
+    } catch (e) { log('✗ tabla.js FAILED: ' + e.message); }
+
+    try {
+      swarSynth = (await import('./js/swar-synth.js')).default;
+      log('✓ swar-synth.js loaded');
+    } catch (e) { log('✗ swar-synth.js FAILED: ' + e.message); }
+
+    try {
+      practiceSession = (await import('./js/practice-session.js')).default;
+      log('✓ practice-session.js loaded');
+    } catch (e) { log('✗ practice-session.js FAILED: ' + e.message); }
+
+    // 1. Init Audio
+    document.getElementById('btn-init').addEventListener('click', async () => {
+      try {
+        await audioEngine.init();
+        await audioEngine.resume();
+        log('✓ AudioEngine initialized. State: ' + audioEngine.audioCtx.state);
+        log('  Sample rate: ' + audioEngine.audioCtx.sampleRate);
+      } catch (e) { log('✗ Init FAILED: ' + e.message); }
+    });
+
+    // 2. Test Tanpura
+    document.getElementById('btn-tanpura').addEventListener('click', () => {
+      try {
+        if (!audioEngine.isInitialized) { log('✗ Init audio first!'); return; }
+        tanpura.start(196.0, 0); // G key, 0 cents
+        log('✓ Tanpura started at Sa=196Hz. You should hear a drone.');
+      } catch (e) { log('✗ Tanpura FAILED: ' + e.message + '\n' + e.stack); }
+    });
+
+    // 3. Test Tabla
+    document.getElementById('btn-tabla').addEventListener('click', () => {
+      try {
+        if (!audioEngine.isInitialized) { log('✗ Init audio first!'); return; }
+        tabla.setSaFreq(196.0);
+        const now = audioEngine.audioCtx.currentTime;
+        tabla.playBolAtTime('Dha', now, 1.0);
+        tabla.playBolAtTime('Dhin', now + 0.5, 0.85);
+        tabla.playBolAtTime('Tin', now + 1.0, 0.5);
+        tabla.playBolAtTime('Ta', now + 1.5, 0.65);
+        log('✓ Tabla: Playing Dha-Dhin-Tin-Ta sequence. Listen for 4 hits.');
+      } catch (e) { log('✗ Tabla FAILED: ' + e.message + '\n' + e.stack); }
+    });
+
+    // 4. Test Swar — try multiple approaches to diagnose
+    document.getElementById('btn-swar').addEventListener('click', async () => {
+      try {
+        if (!audioEngine.isInitialized) { log('✗ Init audio first!'); return; }
+
+        // Step A: Init swar synth
+        log('  Step A: Initializing swar synth...');
+        await swarSynth.init();
+        log('  Synth initialized: ' + swarSynth._initialized);
+        log('  Player exists: ' + !!swarSynth.player);
+        log('  Active preset: ' + swarSynth.currentVoice);
+        log('  Preset zones: ' + (swarSynth.activePreset?.zones?.length || 'NONE'));
+
+        // Step B: Try playing through our signal chain
+        log('  Step B: Playing through swarGain node...');
+        const now = audioEngine.audioCtx.currentTime;
+        const result = swarSynth.playNote(4, 'bilawal', 196.0, now, 1.0, 0.7);
+        log('  playNote result: ' + JSON.stringify(result ? 'envelope returned' : 'null'));
+
+        // Step C: Try playing directly to destination (bypass our chain)
+        log('  Step C: Playing directly to audioCtx.destination...');
+        const directResult = swarSynth.player.queueWaveTable(
+          audioEngine.audioCtx,
+          audioEngine.audioCtx.destination,
+          swarSynth.activePreset,
+          now + 1.5,
+          60,  // Middle C MIDI note
+          1.0, // 1 second duration
+          0.5  // volume
+        );
+        log('  Direct play result: ' + (directResult ? 'envelope returned' : 'null'));
+        log('  If you hear a note at 1.5s, the issue is in the signal chain routing.');
+        log('  If no sound at all, WebAudioFont preset may be invalid.');
+
+        // Step D: Check the signal chain connectivity
+        log('  Step D: Signal chain check...');
+        log('  swarGain value: ' + audioEngine.swarGain.gain.value);
+        log('  compressor connected: ' + !!audioEngine.compressor);
+        log('  masterGain value: ' + audioEngine.masterGain.gain.value);
+        log('  audioCtx state: ' + audioEngine.audioCtx.state);
+
+      } catch (e) { log('✗ Swar FAILED: ' + e.message + '\n' + e.stack); }
+    });
+
+    // 5. Full Session
+    document.getElementById('btn-session').addEventListener('click', async () => {
+      try {
+        const { PRACTICE_DEFAULTS } = await import('./js/config.js');
+        const settings = { ...PRACTICE_DEFAULTS };
+        practiceSession.configure(settings);
+        await practiceSession.start();
+        log('✓ Full session started! Tanpura + Tabla + Harmonium.');
+      } catch (e) { log('✗ Session FAILED: ' + e.message + '\n' + e.stack); }
+    });
+
+    // 6. Stop
+    document.getElementById('btn-stop').addEventListener('click', () => {
+      try {
+        if (tanpura && tanpura.isPlaying) tanpura.stop();
+        if (practiceSession) practiceSession.stop();
+        log('✓ Stopped all audio.');
+      } catch (e) { log('✗ Stop FAILED: ' + e.message); }
+    });
   </script>
 </body>
 </html>

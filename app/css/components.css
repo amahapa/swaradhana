@@ -1221,6 +1221,177 @@ input[type="range"].swar-slider-inactive::-moz-range-progress {
 }
 .bol-chip .chip-remove { font-size: 0.7rem; opacity: 0.7; }
 
+/* Accent markers inside matra cells — tiny coloured pills below the bol text */
+.matra-accents {
+  display: flex; gap: 2px; justify-content: center; margin-top: 2px;
+  position: absolute; bottom: 2px; left: 0; right: 0;
+}
+.accent-dot {
+  width: 12px; height: 12px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 0.55rem; font-weight: 700; line-height: 1;
+  color: var(--bg-primary);
+}
+.accent-dot.accent-manjira_1,
+.accent-dot.accent-manjira_2 { background: #F5A623; } /* warm — manjira */
+.accent-dot.accent-ghungroo_1 { background: #7B8CDE; } /* cool — ghungroo */
+.accent-dot.accent-tali_1    { background: #4ECDC4; } /* teal — tali */
+
+/* ====================================================================
+   Exercise scroll-strip — 5 matras centered on currently-playing beat.
+   Updated at beat boundaries (no CSS transitions) so audio stays jitter
+   free on mobile.
+   ==================================================================== */
+.ex-strip {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.8fr 1fr 1fr;
+  gap: 6px;
+  padding: 10px 16px 12px;
+  align-items: stretch;
+}
+.ex-strip-cell {
+  position: relative;
+  min-height: 128px;
+  padding: 22px 4px 22px;
+  background: var(--bg-tertiary);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.ex-strip-cell.past { opacity: 0.45; }
+.ex-strip-cell.future { opacity: 0.85; }
+.ex-strip-cell.empty { opacity: 0.2; }
+.ex-strip-cell.now {
+  background: var(--accent-glow, rgba(245, 166, 35, 0.15));
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-glow);
+  min-height: 156px;
+}
+
+/* Top row — matra number (left) + tpi marker (right) */
+.ex-strip-cell .ex-strip-meta {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  right: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.3px;
+}
+.ex-strip-cell.now .ex-strip-meta { font-size: 1.05rem; }
+.ex-strip-cell .ex-strip-matra-num {
+  color: var(--accent, #F5A623);
+}
+.ex-strip-cell .ex-strip-tpi {
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.ex-strip-cell .ex-strip-tpi.tpi-X {
+  color: #1a1a1a;
+  background: var(--sam, #F5A623);
+}
+.ex-strip-cell .ex-strip-tpi.tpi-0 {
+  color: #ffffff;
+  background: var(--khali, #7B8CDE);
+}
+.ex-strip-cell .ex-strip-tpi.tpi-num {
+  color: #1a1a1a;
+  background: var(--tali, #4ECDC4);
+}
+
+/* Swara — the main thing a flute player watches */
+.ex-strip-cell .ex-strip-swara {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-align: center;
+  line-height: 1.1;
+  letter-spacing: 0.5px;
+}
+.ex-strip-cell.now .ex-strip-swara { font-size: 2.4rem; }
+.ex-strip-cell .ex-strip-swara.multi { font-size: 1.1rem; }
+.ex-strip-cell.now .ex-strip-swara.multi { font-size: 1.5rem; }
+
+/* Tabla bol — contrasting cyan so it's clearly distinct from the swara */
+.ex-strip-cell .ex-strip-bol {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--tali, #4ECDC4);
+  margin-top: 4px;
+  text-align: center;
+  line-height: 1.1;
+  letter-spacing: 0.3px;
+}
+.ex-strip-cell.now .ex-strip-bol { font-size: 1.15rem; }
+
+/* Accent badges row — same palette as the taal-table dots but larger */
+.ex-strip-cell .ex-strip-accents {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  margin-top: 4px;
+}
+.ex-strip-cell .ex-strip-accents .accent-dot {
+  width: 16px;
+  height: 16px;
+  font-size: 0.7rem;
+}
+.ex-strip-cell.now .ex-strip-accents .accent-dot {
+  width: 20px;
+  height: 20px;
+  font-size: 0.85rem;
+}
+
+/* Section badge (Aroha / Avaroha / A1 / V2) — a solid pill so it pops */
+.ex-strip-cell .ex-strip-section-badge {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #1a1a1a;
+  background: var(--accent, #F5A623);
+  padding: 2px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.ex-strip-cell.now .ex-strip-section-badge { font-size: 0.85rem; padding: 3px 10px; }
+.ex-strip-cell .ex-strip-section-badge.avaroha {
+  background: var(--khali, #7B8CDE);
+  color: #ffffff;
+}
+
+/* Mobile: drop to 3 cells so the NOW cell stays readable. */
+@media (max-width: 640px) {
+  .ex-strip {
+    grid-template-columns: 1fr 1.8fr 1fr !important;
+  }
+  .ex-strip-cell[data-slot="0"],
+  .ex-strip-cell[data-slot="4"] { display: none !important; }
+}
+@media (max-width: 380px) {
+  .ex-strip-cell .ex-strip-swara { font-size: 1.3rem; }
+  .ex-strip-cell.now .ex-strip-swara { font-size: 1.9rem; }
+  .ex-strip-cell .ex-strip-bol { font-size: 0.85rem; }
+  .ex-strip-cell.now .ex-strip-bol { font-size: 1.05rem; }
+  .ex-strip-cell .ex-strip-meta { font-size: 0.8rem; }
+  .ex-strip-cell.now .ex-strip-meta { font-size: 0.95rem; }
+}
+
 /* Variation list item */
 .variation-item {
   display: flex; align-items: center; padding: 12px 8px; border-bottom: 1px solid var(--border, #333);

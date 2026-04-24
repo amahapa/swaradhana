@@ -1,27 +1,38 @@
 /**
  * @fileoverview Electronic (synthesized) tanpura engine.
  *
- * Extracted from the original tanpura.js. Implements the shared tanpura
- * engine interface consumed by js/tanpura.js (the controller):
+ * Additive synthesis via Web Audio `PeriodicWave`. Each string is a pair
+ * of slightly-detuned oscillators sharing one envelope gain; the jivari
+ * slider controls harmonic count (2 → 32 harmonics) via a live
+ * `setPeriodicWave` call.
  *
- *   - static id          : 'electronic'
- *   - static label       : 'Electronic'
- *   - static capabilities: { patterns: ['pa','ma','ni'] }
+ * Implements the shared tanpura engine interface consumed by the
+ * controller (`js/tanpura.js`):
  *
- *   - isPlaying:    boolean
- *   - start(saFreq, fineTuningCents): Promise<void>
- *   - stop(): void
- *   - updateConfig(partial): void
- *   - setJivari(percent): void
- *   - setOutputGain(value, rampSeconds=0): void  // crossfade support
+ * ```
+ *   static id, static label, static capabilities
+ *
+ *   isPlaying: boolean
+ *   start(saFreq, fineTuningCents):  Promise<void>
+ *   stop():                          void
+ *   updateConfig(partial):           void
+ *   setJivari(percent):              void
+ *   setDetuneCents(cents):           void
+ *   setDestination(audioNode):       void   // controller picks routing
+ *   setOutputGain(value, rampSec=0): void   // crossfade helper
+ * ```
  *
  * Signal flow per string:
- *   oscA -\
- *          > envelope ──► outputGain ──► audioEngine.tanpuraGainA
- *   oscB -/
  *
- * The output gain is owned by this engine so the controller can crossfade
- * between engines while both are sounding.
+ * ```
+ *   oscA -\
+ *          > envelope ──► outputGain ──► (destination set by controller)
+ *   oscB -/
+ * ```
+ *
+ * The controller calls `setDestination()` with either `audioEngine.masterGain`
+ * (single mode — direct, bypasses the A/B balance chain) or
+ * `audioEngine.tanpuraGainA` / `tanpuraGainB` (concert mode).
  *
  * @module tanpura-electronic-engine
  */
@@ -30,6 +41,10 @@ import audioEngine from './audio-engine.js';
 import { SWAR_RATIOS, PRACTICE_DEFAULTS } from './config.js';
 import { getEffectiveSaFreq } from './music-engine.js';
 
+// Relaxed on mobile — the electronic tanpura has its own pluck scheduler
+// separate from the taal engine's. 100ms pump + 250ms lookahead gives the
+// audio thread far more headroom to survive main-thread stalls (which
+// cause audible pauses in the drone) at negligible cost to pluck timing.
 const SCHEDULER_INTERVAL_MS = 100;
 const SCHEDULE_AHEAD_S = 0.25;
 const ATTACK_TIME = 0.03;
@@ -85,8 +100,7 @@ export class ElectronicTanpuraEngine {
     static label = 'Electronic';
     static capabilities = Object.freeze({ patterns: ['pa', 'ma', 'ni'] });
 
-    constructor(busId = 'A') {
-        this._busId = (busId === 'B') ? 'B' : 'A';
+    constructor() {
         this.isPlaying = false;
         this.config = {
             pattern: PRACTICE_DEFAULTS.tanpuraPattern,
@@ -106,6 +120,27 @@ export class ElectronicTanpuraEngine {
         this._fineTuningCents = 0;
         /** @type {GainNode|null} */
         this._outputGain = null;
+        /** @type {AudioNode|null} destination set by the controller. */
+        this._destination = null;
+    }
+
+    /**
+     * Point this engine at a destination node. Called by the controller
+     * before {@link start}, and again whenever concert-mode toggles
+     * re-route us between `masterGain` and `tanpuraGainA`/`B`.
+     *
+     * Safe to call while playing — existing connections are dropped and
+     * the outputGain is re-wired without restarting oscillators.
+     *
+     * @param {AudioNode} node
+     */
+    setDestination(node) {
+        if (!node) return;
+        this._destination = node;
+        if (this._outputGain) {
+            try { this._outputGain.disconnect(); } catch (_) {}
+            this._outputGain.connect(node);
+        }
     }
 
     async start(baseSaFreq, fineTuningCents = 0) {
@@ -216,8 +251,10 @@ export class ElectronicTanpuraEngine {
         const ctx = audioEngine.audioCtx;
         this._outputGain = ctx.createGain();
         this._outputGain.gain.value = 1.0;
-        const busNode = this._busId === 'B' ? 'tanpuraB' : 'tanpuraA';
-        this._outputGain.connect(audioEngine.getInputNode(busNode));
+        // Controller should have called setDestination before start; fall
+        // back to masterGain so we at least produce sound if not.
+        const dest = this._destination || audioEngine.masterGain;
+        this._outputGain.connect(dest);
     }
 
     _computeStringFrequencies(effectiveSa) {

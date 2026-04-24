@@ -91,13 +91,18 @@ export class TaalEngine {
     /**
      * How far ahead (in seconds) to schedule beats. A larger value provides
      * more resilience against garbage-collection pauses but adds latency.
+     * Increased to 200ms for mobile — gives the audio thread much more
+     * buffer to survive main-thread stalls (the common cause of audible
+     * pauses on Android Chrome). Practice-app latency is not critical.
      * @type {number}
      */
     this._scheduleAheadTime = 0.2; // 200ms lookahead
 
     /**
      * How often (in ms) the scheduler pump fires to check whether new beats
-     * need to be scheduled.
+     * need to be scheduled. Raised from 25ms to 50ms to halve the
+     * scheduler CPU cost — the 200ms lookahead easily absorbs the lower
+     * polling rate.
      * @type {number}
      */
     this._pumpInterval = 50; // 50ms
@@ -312,11 +317,7 @@ export class TaalEngine {
   getVelocity(matraIndex, concertMode = false) {
     const beatType = this.getBeatType(matraIndex);
     const profile = concertMode ? VELOCITY_SCALING.concert : VELOCITY_SCALING.practice;
-    const baseGain = profile[beatType] || profile.filler;
-
-    // Humanization removed — all cycles must sound identical for practice timing.
-
-    return baseGain;
+    return profile[beatType] || profile.filler;
   }
 
   // -------------------------------------------------------------------------

@@ -397,6 +397,289 @@ export function generateFromCompactPattern(options) {
 }
 
 // ---------------------------------------------------------------------------
+// "Last+1" extension — sequential continuation generator
+// ---------------------------------------------------------------------------
+
+/**
+ * Permissive seed parser. Accepts any compact pattern fragment — does NOT
+ * validate vibhag count or per-vibhag beat count against a taal. Used by
+ * the Last+1 extension path where the user's input is a short seed that
+ * will be extended over the full taal cycle.
+ *
+ * Shares the same grammar as {@link parseCompactPattern}:
+ *   digits 1-9, '.' rest, '_' sustain, space splits seed vibhags, [..]
+ *   for multi-note beats.
+ *
+ * @param {string} input
+ * @returns {{
+ *   vibhags: Array<Array<Array<number|null|string>>>,
+ *   flat: Array<number|null|string>,
+ *   beatStructure: number[],
+ *   baseDigit: number,
+ *   error: string|null
+ * }}
+ */
+export function parseCompactPatternSeed(input) {
+  const result = {
+    vibhags: [],
+    flat: [],
+    beatStructure: [],
+    baseDigit: 1,
+    error: null,
+  };
+
+  const trimmed = (input || '').trim();
+  if (!trimmed) {
+    result.error = 'Seed is empty.';
+    return result;
+  }
+
+  const invalidMatch = trimmed.match(/[^1-9._\[\] ]/);
+  if (invalidMatch) {
+    result.error = `Invalid character '${invalidMatch[0]}' — use digits 1-9, '.' for rest, '_' for sustain, [] for grouping, space for vibhag separator.`;
+    return result;
+  }
+
+  const groups = trimmed.split(/\s+/);
+
+  for (let v = 0; v < groups.length; v++) {
+    const group = groups[v];
+    const beats = [];
+    let i = 0;
+
+    while (i < group.length) {
+      if (group[i] === '[') {
+        const closeIdx = group.indexOf(']', i);
+        if (closeIdx === -1) {
+          result.error = `Unclosed bracket in vibhag ${v + 1}.`;
+          return result;
+        }
+        const inner = group.substring(i + 1, closeIdx);
+        if (inner.length < 2 || inner.length > 4) {
+          result.error = `Bracket group [${inner}] in vibhag ${v + 1} has ${inner.length} notes — need 2-4 per beat.`;
+          return result;
+        }
+        const beatNotes = [];
+        for (const ch of inner) {
+          if (ch === '.') beatNotes.push(null);
+          else if (ch === '_') beatNotes.push('_');
+          else if (ch >= '1' && ch <= '9') beatNotes.push(parseInt(ch, 10));
+          else {
+            result.error = `Invalid character '${ch}' inside brackets in vibhag ${v + 1}.`;
+            return result;
+          }
+        }
+        beats.push(beatNotes);
+        i = closeIdx + 1;
+      } else if (group[i] === '.') {
+        beats.push([null]);
+        i++;
+      } else if (group[i] === '_') {
+        beats.push(['_']);
+        i++;
+      } else if (group[i] >= '1' && group[i] <= '9') {
+        beats.push([parseInt(group[i], 10)]);
+        i++;
+      } else {
+        result.error = `Unexpected character '${group[i]}' in vibhag ${v + 1}.`;
+        return result;
+      }
+    }
+
+    if (beats.length === 0) {
+      result.error = `Vibhag ${v + 1} is empty.`;
+      return result;
+    }
+    result.vibhags.push(beats);
+  }
+
+  // Validate: '_' can't be the very first note (nothing to sustain).
+  if (result.vibhags[0][0][0] === '_') {
+    result.error = `'_' (sustain) cannot be the first note — there is no previous note to continue.`;
+    return result;
+  }
+
+  // Build flat + beatStructure + baseDigit.
+  let minDigit = 9;
+  for (const vibhag of result.vibhags) {
+    for (const beat of vibhag) {
+      result.beatStructure.push(beat.length);
+      for (const note of beat) {
+        result.flat.push(note);
+        if (typeof note === 'number' && note < minDigit) minDigit = note;
+      }
+    }
+  }
+  result.baseDigit = minDigit;
+
+  return result;
+}
+
+/**
+ * "Last+1" extension generator.
+ *
+ * Treats the seed as a rhythmic-melodic **template** and repeats it
+ * across the full taal cycle. On each repetition, every numeric digit
+ * in the template is shifted by the seed's **span**:
+ *
+ * ```
+ *   span = (max digit in seed) − (min digit in seed) + 1
+ * ```
+ *
+ * Rests (`.`) and sustains (`_`) are preserved verbatim across every
+ * repetition. When a shifted digit maps to a flute position beyond
+ * `rangeEnd`, that slot is silenced.
+ *
+ * Examples (Teentaal, 16 matras, range 1..15):
+ *   seed `1234` (span 4) → 1,2,3,4 | 5,6,7,8 | 9,10,11,12 | 13,14,15,.
+ *   seed `1122` (span 2) → 1,1,2,2 | 3,3,4,4 | 5,5,6,6 | 7,7,8,8
+ *   seed `[12]` (span 2) → [1,2][3,4][5,6][7,8][9,10][11,12][13,14][15,.]
+ *
+ * The seed's laykari (notes-per-matra) is also preserved by cycling
+ * through `seed.beatStructure` for every matra of the taal.
+ *
+ * @param {object} options
+ * @param {string} options.seedInput   raw compact-pattern seed as typed
+ * @param {string} options.taalId      must exist in TAAL_DEFINITIONS
+ * @param {number} options.rangeStart  flute position (1..15)
+ * @param {number} options.rangeEnd    flute position (rangeStart..15)
+ * @returns {{
+ *   arohaCycles,
+ *   avarohaCycles,
+ *   beatStructure,
+ *   compactNotation,      // stays as the seed — per option A-i
+ *   extensionMode: 'last-plus-1',
+ *   error?: string
+ * }}
+ */
+export function generateFromCompactPatternLastPlusOne(options) {
+  const { seedInput, taalId, rangeStart = 1, rangeEnd = 15 } = options;
+
+  const empty = {
+    arohaCycles: [], avarohaCycles: [], beatStructure: [],
+    compactNotation: seedInput || '', extensionMode: 'last-plus-1',
+  };
+
+  const taalDef = TAAL_DEFINITIONS[taalId];
+  if (!taalDef) return { ...empty, error: `Unknown taal "${taalId}".` };
+
+  const seed = parseCompactPatternSeed(seedInput);
+  if (seed.error) return { ...empty, error: seed.error };
+
+  const totalMatras = taalDef.vibhag.reduce((a, b) => a + b, 0);
+  const seedMatras = seed.beatStructure.length;
+  if (seedMatras > totalMatras) {
+    return { ...empty, error: `Seed has ${seedMatras} matras but ${taalDef.name} only has ${totalMatras}.` };
+  }
+
+  // Find the first and last numeric digits in the seed (in playback order).
+  // The shift between consecutive iterations is chosen so that the first
+  // digit of the next iteration equals the last digit of the current + 1:
+  //   shift = lastNumeric + 1 - firstNumeric
+  // This honours the "Last+1" rule regardless of where the max digit sits.
+  let firstNumeric = null;
+  let lastNumeric = null;
+  for (const n of seed.flat) {
+    if (typeof n === 'number') {
+      if (firstNumeric === null) firstNumeric = n;
+      lastNumeric = n;
+    }
+  }
+  if (firstNumeric === null) {
+    return { ...empty, error: 'Seed must contain at least one note digit (1-9).' };
+  }
+  const shift = lastNumeric + 1 - firstNumeric;
+  if (shift <= 0) {
+    return { ...empty, error: 'Last+1 requires the seed\'s last digit to be ≥ first digit (ascending progression).' };
+  }
+
+  // Build per-matra notes-per-beat by cycling through the seed's beatStructure.
+  const beatStructure = [];
+  for (let m = 0; m < totalMatras; m++) {
+    beatStructure.push(seed.beatStructure[m % seed.beatStructure.length]);
+  }
+  const notesPerCycle = beatStructure.reduce((a, b) => a + b, 0);
+
+  // The top digit that corresponds to rangeEnd (e.g. P'). Aroha extension
+  // continues until the iteration's last digit reaches this value.
+  const rangeDigitTop = seed.baseDigit + (rangeEnd - rangeStart);
+
+  // Emit seed iterations until the last digit of the iteration reaches
+  // rangeDigitTop. Each iteration k shifts every numeric digit by k × shift;
+  // '.' and '_' pass through unchanged. Any digit that exceeds rangeDigitTop
+  // is clamped to silence so the rhythm stays intact.
+  const arohaFlat = [];
+  for (let k = 0; k < 200; k++) {
+    for (const n of seed.flat) {
+      if (n === null) arohaFlat.push(null);
+      else if (n === '_') arohaFlat.push('_');
+      else if (n + k * shift > rangeDigitTop) arohaFlat.push(null);
+      else arohaFlat.push(n + k * shift);
+    }
+    if (lastNumeric + k * shift >= rangeDigitTop) break;
+  }
+
+  // Pad a flat sequence with silence so its length is a multiple of
+  // notesPerCycle (i.e. the last taal cycle is completed).
+  function padToCycle(flat) {
+    const rem = flat.length % notesPerCycle;
+    if (rem === 0) return flat.slice();
+    const out = flat.slice();
+    const pad = notesPerCycle - rem;
+    for (let i = 0; i < pad; i++) out.push(null);
+    return out;
+  }
+
+  const arohaPadded = padToCycle(arohaFlat);
+
+  // Avaroha starts at a NEW taal cycle, beginning with the peak note and
+  // descending to the seed's first (minimum) note. To ensure avaroha starts
+  // at the peak (not a rest from padding or overshoot), reverse the UNPADDED
+  // aroha, then strip any leading silence before padding the tail.
+  const reversed = arohaFlat.slice().reverse();
+  let startIdx = 0;
+  while (startIdx < reversed.length && reversed[startIdx] === null) startIdx++;
+  const avarohaPadded = padToCycle(reversed.slice(startIdx));
+
+  // Split a flat sequence into one or more taal cycles. Each cycle is
+  // reshaped by mapping digits to flute positions; positions outside the
+  // [rangeStart, rangeEnd] range become silence (null).
+  function reshapeCycles(flat) {
+    const cycles = [];
+    for (let c = 0; c < flat.length; c += notesPerCycle) {
+      const cycleFlat = flat.slice(c, c + notesPerCycle);
+      const beats = [];
+      let flatIdx = 0;
+      for (let m = 0; m < totalMatras; m++) {
+        const npm = beatStructure[m];
+        const rawNotes = cycleFlat.slice(flatIdx, flatIdx + npm);
+        flatIdx += npm;
+        const positions = rawNotes.map(n => {
+          if (n === null) return null;
+          if (n === '_') return '_';
+          if (typeof n === 'number') {
+            const pos = rangeStart + (n - seed.baseDigit);
+            return (pos > rangeEnd || pos < rangeStart) ? null : pos;
+          }
+          return null;
+        });
+        beats.push({ positions });
+      }
+      cycles.push({ beats });
+    }
+    return cycles;
+  }
+
+  return {
+    arohaCycles: reshapeCycles(arohaPadded),
+    avarohaCycles: reshapeCycles(avarohaPadded),
+    beatStructure,
+    compactNotation: seedInput, // stays as the seed (A-i)
+    extensionMode: 'last-plus-1',
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Alankaar generation
 // ---------------------------------------------------------------------------
 

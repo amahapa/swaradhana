@@ -154,11 +154,12 @@ async function _releaseWakeLock() {
  *   - MediaSession state mirrors the "any source active?" flag.
  */
 function _syncSilentPlayback() {
-    if (!_silentAudioEl) return;
     const shouldPlay = _activeSources.size > 0 && document.visibilityState === 'hidden';
-    if (shouldPlay && _silentAudioEl.paused) {
-        _silentAudioEl.play().catch(() => {});
-    } else if (!shouldPlay && !_silentAudioEl.paused) {
+    if (shouldPlay) {
+        // Create the silent <audio> lazily only when actually needed.
+        const audio = _ensureSilentAudio();
+        if (audio.paused) audio.play().catch(() => {});
+    } else if (_silentAudioEl && !_silentAudioEl.paused) {
         try {
             _silentAudioEl.pause();
             _silentAudioEl.currentTime = 0;
@@ -175,10 +176,11 @@ async function activate(source = 'generic') {
     _activeSources.add(source);
     if (!wasEmpty) return; // already active
 
-    _ensureSilentAudio();            // create the element so it's ready
+    // Do not pre-create the silent <audio> element — in foreground use it
+    // is unnecessary and its mere existence in the DOM adds periodic work
+    // on some mobile browsers. It's created lazily on visibilitychange:hidden.
     _setupMediaSession();
     await _requestWakeLock();
-    _syncSilentPlayback();           // play silent loop only if tab is hidden
 }
 
 /**

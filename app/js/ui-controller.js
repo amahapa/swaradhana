@@ -1,16 +1,6 @@
 /**
- * @file ui-controller.js
- * @description UI binding module for Swaradhana. Connects HTML elements to the
- * application state object. Contains zero audio logic — only DOM manipulation
- * and event handling. The audio engine is called through its public API
- * (volume / EQ setters) but never accessed at the AudioNode level.
- *
- * Imports:
- *  - config.js   — TAAL_DEFINITIONS, THAAT_DEFINITIONS, KEY_FREQUENCIES,
- *                   LAYA_RANGES, PRACTICE_DEFAULTS, STORAGE_KEYS
- *  - music-engine.js — classifyLaya (tempo -> laya label)
- *  - storage.js  — save() for persisting settings after every change
- *  - audio-engine.js — singleton for volume / EQ / pan setters
+ * @fileoverview UI binding layer. Connects DOM to the shared settings object
+ * and to engine singletons. No direct AudioNode access — only public API calls.
  *
  * @module ui-controller
  */
@@ -25,9 +15,10 @@ import {
 } from './config.js';
 
 import { classifyLaya, getPositionLabel } from './music-engine.js';
-import { parsePattern, generateExerciseAlankaar, fitExerciseToTaal, getPatternPreset, parseCompactPattern, compactPatternToString, generateFromCompactPattern } from './alankaar-engine.js';
+import { parsePattern, generateExerciseAlankaar, fitExerciseToTaal, getPatternPreset, parseCompactPattern, parseCompactPatternSeed, compactPatternToString, generateFromCompactPattern, generateFromCompactPatternLastPlusOne } from './alankaar-engine.js';
 import { save, exportAllData, importAllData, clearAllData } from './storage.js';
 import audioEngine from './audio-engine.js';
+import accentPlayer, { ACCENT_KEYS, ACCENT_LABELS } from './accents.js';
 import practiceTracker from './practice-tracker.js';
 import profile from './profile.js';
 import backgroundAudio from './background-audio.js';
@@ -48,39 +39,11 @@ let _settings = null;
 /** @type {Object|null} Separate TaalEngine instance for exercise playback. */
 let exerciseTaalEngine = null;
 
-// ---------------------------------------------------------------------------
-// Helper: toggleButtonGroup
-// ---------------------------------------------------------------------------
-
-/**
- * Deactivate every button in a group, then activate the clicked one.
- *
- * @param {NodeList|Array<HTMLElement>} buttons - All buttons in the group.
- * @param {HTMLElement} activeButton - The button that should receive the
- *   `btn-active` class.
- */
 function toggleButtonGroup(buttons, activeButton) {
   buttons.forEach((btn) => btn.classList.remove('btn-active'));
   activeButton.classList.add('btn-active');
 }
 
-// ---------------------------------------------------------------------------
-// Helper: updateSettingsSummary
-// ---------------------------------------------------------------------------
-
-/**
- * Refresh every span in the Settings Summary Bar to reflect the current
- * settings values.
- *
- * Expected DOM ids:
- *  - #summary-key
- *  - #summary-thaat
- *  - #summary-taal
- *  - #summary-tempo
- *  - #summary-laya
- *
- * @param {Object} settings - The current settings object.
- */
 function updateSettingsSummary(settings) {
   // Update all display elements on the main screen
   const keyDisplay     = document.getElementById('key-display');
@@ -150,22 +113,8 @@ function updateSettingsSummary(settings) {
   if (bpmLaya) bpmLaya.textContent = getLayaLabel(settings.tempo);
 }
 
-// ---------------------------------------------------------------------------
-// Helper: getLayaLabel
-// ---------------------------------------------------------------------------
-
-/**
- * Classify a tempo (BPM) into a Hindustani laya category name.
- *
- * Uses the LAYA_RANGES lookup from config.js. Each range is a
- * [min, max] tuple. At boundary values the higher category wins
- * (e.g. 80 BPM -> Madhya, not Vilambit).
- *
- * @param {number} bpm - Tempo in beats per minute.
- * @returns {string} Human-readable laya label.
- */
+/** Classify a tempo (BPM) into a Hindustani laya category name. */
 function getLayaLabel(bpm) {
-  // Walk through LAYA_RANGES object in order from slowest to fastest.
   const entries = [
     { name: 'Ati-Vilambit', range: LAYA_RANGES.atiVilambit },
     { name: 'Vilambit',     range: LAYA_RANGES.vilambit },
@@ -179,21 +128,9 @@ function getLayaLabel(bpm) {
       return name;
     }
   }
-
-  // If bpm exceeds all ranges, return the fastest category.
   return 'Ati-Drut';
 }
 
-// ---------------------------------------------------------------------------
-// Helper: formatEQ
-// ---------------------------------------------------------------------------
-
-/**
- * Format a decibel value for display (e.g. "0 dB", "+6 dB", "-3 dB").
- *
- * @param {number} dB - Decibel value.
- * @returns {string} Formatted string with sign and "dB" suffix.
- */
 function formatEQ(dB) {
   const n = Number(dB);
   if (n > 0) return `+${n} dB`;
@@ -201,18 +138,8 @@ function formatEQ(dB) {
   return '0 dB';
 }
 
-// ---------------------------------------------------------------------------
-// Helper: persistSettings
-// ---------------------------------------------------------------------------
-
-/**
- * Save the current settings object to localStorage.
- * Called after every setting mutation.
- */
 function persistSettings() {
-  if (_settings) {
-    save(STORAGE_KEYS.SETTINGS, _settings);
-  }
+  if (_settings) save(STORAGE_KEYS.SETTINGS, _settings);
 }
 
 // ---------------------------------------------------------------------------
@@ -640,6 +567,8 @@ export function initUI(settings) {
         btnTablaQuickToggle.innerHTML = '<span style="font-size:1.1rem;">▶</span>';
         btnTablaQuickToggle.style.background = 'transparent';
         btnTablaQuickToggle.style.color = 'var(--accent)';
+        // Reset + hide the strip if no exercise is queued.
+        _resetExerciseStrip();
       } else {
         // Start tabla
         if (!audioEngine.isInitialized) await audioEngine.init();
@@ -662,13 +591,24 @@ export function initUI(settings) {
             bolsForMatra.forEach((subBol, i) => {
               _playTablaBol(subBol, scheduledTime + i * subDuration, velocity, subDuration);
             });
+            _playAccentsForMatra(matraIndex, scheduledTime, velocity, settings.taal);
+            // Advance the on-screen strip so the user can follow the taal
+            // while playing a bandish — even without a loaded exercise.
+            _advanceExerciseStrip(matraIndex);
           });
+          // Reset strip state and switch to taal-only mode (no swaras)
+          // for the tempo button, even if an exercise is loaded.
+          _stripPointer = -1;
+          _stripTaalCycleCount = 0;
+          _stripLastMatraIdx = -1;
+          _stripMode = 'taal';
           tablaTaalEngine.start(audioEngine.audioCtx);
           tablaPlaying = true;
           backgroundAudio.activate('tabla-quick');
           btnTablaQuickToggle.innerHTML = '<span style="font-size:1.1rem;">■</span>';
           btnTablaQuickToggle.style.background = 'var(--accent)';
           btnTablaQuickToggle.style.color = 'var(--bg-primary)';
+          _syncExerciseStrip();
         } catch (err) {
           console.error('[UI] Tabla quick start failed:', err);
         }
@@ -807,6 +747,11 @@ export function initUI(settings) {
   let _tablaSampleMode = false;
 
   async function _ensureTablaMode() {
+    // Preload the accent buffers on every tabla-mode prep, regardless of
+    // whether the tabla source is electronic or sample-based. The player is
+    // idempotent so this is cheap after the first call.
+    accentPlayer.load().catch((e) => console.warn('[UI] Accent preload failed:', e));
+
     const source = settings.tablaSource || 'electronic';
     if (source === 'electronic') {
       _tablaSampleMode = false;
@@ -1000,6 +945,41 @@ export function initUI(settings) {
     return _thekaToArrayFormat(taalDef.bols);
   }
 
+  // Returns the per-matra accent array for the currently active variation.
+  // The default theka has no accents; custom variations may set them via the
+  // editor. Returns an array of empty arrays when nothing is set, so call
+  // sites can index without null-checks.
+  function _getActiveAccents(taalId) {
+    const taalDef = TAAL_DEFINITIONS[taalId];
+    if (!taalDef) return [];
+    const empty = () => Array.from({ length: taalDef.beats }, () => []);
+    const varId = settings.taalVariation || 'default';
+    if (varId === 'default') return empty();
+    const varKey = STORAGE_KEYS.TAAL_VARIATIONS;
+    const allVars = JSON.parse(localStorage.getItem(varKey) || '[]');
+    const variation = allVars.find(v => v.id === varId && v.taalId === taalId);
+    if (!variation || !Array.isArray(variation.accents)) return empty();
+    // Defensive: pad/truncate to match taal length so a variation created
+    // against an older taal definition still plays cleanly.
+    const out = empty();
+    for (let i = 0; i < out.length; i++) {
+      const val = variation.accents[i];
+      if (Array.isArray(val)) out[i] = val.slice();
+    }
+    return out;
+  }
+
+  // Schedule all accents attached to a matra at the given audio time. Safe
+  // to call even if accents haven't loaded — the player no-ops.
+  function _playAccentsForMatra(matraIndex, time, velocity = 1.0, taalId = null) {
+    if (!accentPlayer.isLoaded) return;
+    const id = taalId || settings.taal;
+    const accents = _getActiveAccents(id);
+    const keys = accents[matraIndex];
+    if (!keys || keys.length === 0) return;
+    accentPlayer.playList(keys, time, velocity);
+  }
+
   // -- Variation switcher (‹ D ›) on main screen taal tile --
   // Builds the ordered list of variation IDs for the current taal: ['default', 'id1', 'id2', ...]
   function _getVariationList(taalId) {
@@ -1169,6 +1149,7 @@ export function initUI(settings) {
 
       // Click taal row → select this taal
       item.addEventListener('click', () => {
+        _clearExerciseIfTaalMismatch(id);
         settings.taal = id;
         settings.taalVariation = 'default'; // reset variation on taal change
         _populateVariationDropdown(id);
@@ -1188,6 +1169,7 @@ export function initUI(settings) {
       // Double-tap or chevron → open detail/variations page
       right.addEventListener('click', (e) => {
         e.stopPropagation();
+        _clearExerciseIfTaalMismatch(id);
         settings.taal = id;
         updateSettingsSummary(settings);
         renderBeatGrid(id);
@@ -1215,7 +1197,7 @@ export function initUI(settings) {
     const taalDef = TAAL_DEFINITIONS[taalId];
     if (!taalDef) return;
 
-    const { editable = false, onCellClick = null, selectedMatra = null } = options;
+    const { editable = false, onCellClick = null, selectedMatra = null, accentsArrayOfArrays = null } = options;
 
     let matraIndex = 0;
     for (let v = 0; v < taalDef.vibhag.length; v++) {
@@ -1267,6 +1249,21 @@ export function initUI(settings) {
         bolsSpan.textContent = bolArr.join(' ');
         cell.appendChild(bolsSpan);
 
+        // Accent markers — a small badge per attached accent (e.g. "m", "g", "t").
+        if (accentsArrayOfArrays && accentsArrayOfArrays[idx] && accentsArrayOfArrays[idx].length > 0) {
+          const accentRow = document.createElement('span');
+          accentRow.classList.add('matra-accents');
+          accentsArrayOfArrays[idx].forEach(key => {
+            const dot = document.createElement('span');
+            dot.classList.add('accent-dot', `accent-${key}`);
+            dot.title = ACCENT_LABELS[key] || key;
+            // First letter of the accent family: m / g / t
+            dot.textContent = (key.charAt(0) || '·').toLowerCase();
+            accentRow.appendChild(dot);
+          });
+          cell.appendChild(accentRow);
+        }
+
         if (editable && onCellClick) {
           cell.addEventListener('click', () => onCellClick(idx));
         }
@@ -1300,6 +1297,7 @@ export function initUI(settings) {
 
   function _renderDetailTable(taalId, varId) {
     let bolsArr;
+    let accentsArr = null;
     if (varId === 'default') {
       const taalDef = TAAL_DEFINITIONS[taalId];
       if (!taalDef) return;
@@ -1310,12 +1308,13 @@ export function initUI(settings) {
       const variation = allVars.find(v => v.id === varId && v.taalId === taalId);
       if (variation && variation.bols) {
         bolsArr = variation.bols;
+        if (Array.isArray(variation.accents)) accentsArr = variation.accents;
       } else {
         const taalDef = TAAL_DEFINITIONS[taalId];
         bolsArr = taalDef ? _thekaToArrayFormat(taalDef.bols) : [];
       }
     }
-    _renderTaalTable('taal-detail-table', taalId, bolsArr);
+    _renderTaalTable('taal-detail-table', taalId, bolsArr, { accentsArrayOfArrays: accentsArr });
   }
 
   function _renderVariationList(taalId) {
@@ -1441,8 +1440,13 @@ export function initUI(settings) {
   let _editorTaalId = null;
   let _editorVarId = null; // null for new, string for existing
   let _editorBols = []; // array-of-arrays, working copy
+  let _editorAccents = []; // array-of-arrays of accent keys, parallel to _editorBols
   let _editorSelectedMatra = null;
   let _editorMode = 'new'; // 'new', 'edit', 'copy-default'
+
+  function _makeEmptyAccents(len) {
+    return Array.from({ length: len }, () => []);
+  }
 
   function _openVarEditor(taalId, varId, mode) {
     _editorTaalId = taalId;
@@ -1464,12 +1468,16 @@ export function initUI(settings) {
       const variation = allVars.find(v => v.id === varId);
       if (!variation) return;
       _editorBols = variation.bols.map(b => [...b]);
+      _editorAccents = Array.isArray(variation.accents)
+        ? variation.bols.map((_, i) => Array.isArray(variation.accents[i]) ? [...variation.accents[i]] : [])
+        : _makeEmptyAccents(_editorBols.length);
       if (titleEl) titleEl.textContent = `Editing: ${variation.name}`;
       if (nameInput) nameInput.value = variation.name;
       if (deleteBtn) deleteBtn.style.display = '';
     } else if (mode === 'copy-default') {
       // Copy from default theka
       _editorBols = _thekaToArrayFormat(taalDef.bols);
+      _editorAccents = _makeEmptyAccents(_editorBols.length);
       const count = _getVariationCount(taalId);
       const autoName = `${taalDef.name} ${count + 1}`;
       if (titleEl) titleEl.textContent = `Editing: ${autoName}`;
@@ -1479,12 +1487,16 @@ export function initUI(settings) {
     } else {
       // New blank variation (start from default theka)
       _editorBols = _thekaToArrayFormat(taalDef.bols);
+      _editorAccents = _makeEmptyAccents(_editorBols.length);
       const count = _getVariationCount(taalId);
       const autoName = `${taalDef.name} ${count + 1}`;
       if (titleEl) titleEl.textContent = `Editing: ${autoName}`;
       if (nameInput) nameInput.value = autoName;
       if (deleteBtn) deleteBtn.style.display = 'none';
     }
+
+    // Preload accent buffers so Preview doesn't stutter on first play.
+    accentPlayer.load().catch(() => {});
 
     // Render the editable table
     _renderEditorTable();
@@ -1494,6 +1506,10 @@ export function initUI(settings) {
 
     // Clear chips
     _renderEditorChips();
+
+    // Render accent palette + chips for the selected matra
+    _renderAccentPalette();
+    _renderAccentChips();
 
     _openPage('taal-var-editor-page');
   }
@@ -1508,10 +1524,12 @@ export function initUI(settings) {
     _renderTaalTable('var-editor-table', _editorTaalId, _editorBols, {
       editable: true,
       selectedMatra: _editorSelectedMatra,
+      accentsArrayOfArrays: _editorAccents,
       onCellClick: (idx) => {
         _editorSelectedMatra = idx;
         _renderEditorTable();
         _renderEditorChips();
+        _renderAccentChips();
       }
     });
   }
@@ -1566,6 +1584,67 @@ export function initUI(settings) {
     });
   }
 
+  // -- Accent chips + palette --
+  function _renderAccentChips() {
+    const chipsContainer = document.getElementById('var-editor-accent-chips');
+    if (!chipsContainer) return;
+    chipsContainer.innerHTML = '';
+
+    if (_editorSelectedMatra === null || _editorSelectedMatra === undefined) {
+      chipsContainer.innerHTML = '<span style="color:var(--text-dim); font-size:0.8rem;">Tap a matra cell above</span>';
+      return;
+    }
+
+    const accentArr = _editorAccents[_editorSelectedMatra] || [];
+    if (accentArr.length === 0) {
+      chipsContainer.innerHTML = '<span style="color:var(--text-dim); font-size:0.8rem;">No accents — tap a button below to add</span>';
+      return;
+    }
+
+    accentArr.forEach((key, i) => {
+      const chip = document.createElement('span');
+      chip.classList.add('bol-chip');
+      chip.innerHTML = `${ACCENT_LABELS[key] || key} <span class="chip-remove">\u2715</span>`;
+      chip.addEventListener('click', () => {
+        _editorAccents[_editorSelectedMatra].splice(i, 1);
+        _renderEditorTable();
+        _renderAccentChips();
+      });
+      chipsContainer.appendChild(chip);
+    });
+  }
+
+  function _renderAccentPalette() {
+    const palette = document.getElementById('var-editor-accent-palette');
+    if (!palette) return;
+    palette.innerHTML = '';
+
+    ACCENT_KEYS.forEach(key => {
+      const btn = document.createElement('button');
+      btn.classList.add('bol-btn');
+      btn.textContent = ACCENT_LABELS[key] || key;
+      btn.title = 'Preview + add to selected matra';
+      btn.addEventListener('click', () => {
+        // Tap always previews — lets user audition without selecting a matra.
+        try {
+          accentPlayer.play(key, audioEngine.audioCtx ? audioEngine.audioCtx.currentTime + 0.02 : 0, 1.0);
+        } catch (_) {}
+
+        if (_editorSelectedMatra === null || _editorSelectedMatra === undefined) return;
+        if (!_editorAccents[_editorSelectedMatra]) _editorAccents[_editorSelectedMatra] = [];
+        // Cap at 4 accents per matra so we stay within the same polyphony
+        // budget as bols (keeps Android mobile stable).
+        if (_editorAccents[_editorSelectedMatra].length >= 4) return;
+        // Prevent duplicates in a single matra.
+        if (_editorAccents[_editorSelectedMatra].includes(key)) return;
+        _editorAccents[_editorSelectedMatra].push(key);
+        _renderEditorTable();
+        _renderAccentChips();
+      });
+      palette.appendChild(btn);
+    });
+  }
+
   // Clear matra button
   const btnClearMatra = document.getElementById('btn-var-clear-matra');
   if (btnClearMatra) {
@@ -1574,6 +1653,17 @@ export function initUI(settings) {
       _editorBols[_editorSelectedMatra] = [];
       _renderEditorTable();
       _renderEditorChips();
+    });
+  }
+
+  // Clear accents button
+  const btnClearAccents = document.getElementById('btn-var-clear-accents');
+  if (btnClearAccents) {
+    btnClearAccents.addEventListener('click', () => {
+      if (_editorSelectedMatra === null || _editorSelectedMatra === undefined) return;
+      _editorAccents[_editorSelectedMatra] = [];
+      _renderEditorTable();
+      _renderAccentChips();
     });
   }
 
@@ -1594,6 +1684,7 @@ export function initUI(settings) {
         if (idx >= 0) {
           allVars[idx].name = name;
           allVars[idx].bols = _editorBols.map(b => [...b]);
+          allVars[idx].accents = _editorAccents.map(a => [...a]);
         }
       } else {
         // Create new
@@ -1603,6 +1694,7 @@ export function initUI(settings) {
           taalId: _editorTaalId,
           name: name,
           bols: _editorBols.map(b => [...b]),
+          accents: _editorAccents.map(a => [...a]),
           createdAt: new Date().toISOString(),
           source: 'custom'
         });
@@ -1677,6 +1769,13 @@ export function initUI(settings) {
             _playTablaBol(bol, time + si * subDuration, velocity, subDuration);
           }
         });
+        // Play accents from the editor's working copy (not the saved
+        // variation — the user may not have saved yet).
+        const accentKeys = (_editorAccents && _editorAccents[i]) || [];
+        if (accentKeys.length > 0) {
+          const velocity = i === 0 ? 1.0 : 0.7;
+          accentPlayer.playList(accentKeys, time, velocity);
+        }
         time += beatDuration;
       }
       // Visual feedback
@@ -1827,7 +1926,9 @@ export function initUI(settings) {
   if (quickTaal) {
     quickTaal.value = settings.taal || 'teentaal';
     quickTaal.addEventListener('change', () => {
-      settings.taal = quickTaal.value;
+      const newTaalId = quickTaal.value;
+      _clearExerciseIfTaalMismatch(newTaalId);
+      settings.taal = newTaalId;
       settings.taalVariation = 'default';
       _populateVariationDropdown(settings.taal);
       // Sync modal dropdown
@@ -1836,12 +1937,14 @@ export function initUI(settings) {
       // Rebuild beat grid
       renderBeatGrid(settings.taal);
       persistSettings();
+      // Also update any running taal engines so playback swaps.
+      if (tablaTaalEngine && tablaPlaying) tablaTaalEngine.setTaal(settings.taal);
+      if (practiceSession && practiceSession.taalEngine && practiceSession.state === 'playing') {
+        practiceSession.taalEngine.setTaal(settings.taal);
+      }
       console.log('[UI] Taal changed to:', settings.taal);
     });
   }
-
-  // Old taal editor removed — replaced by the new variation editor above.
-  // Settings button now opens the settings-page (handled in tileActions above).
 
   // ========================================================================
   // 3a. Key (Scale) Dropdown
@@ -1931,12 +2034,17 @@ export function initUI(settings) {
     taalSelect.value = settings.taal;
 
     taalSelect.addEventListener('change', () => {
-      settings.taal = taalSelect.value;
+      const newTaalId = taalSelect.value;
+      _clearExerciseIfTaalMismatch(newTaalId);
+      settings.taal = newTaalId;
       settings.taalVariation = 'default';
       _populateVariationDropdown(settings.taal);
       updateSettingsSummary(settings);
       renderBeatGrid(settings.taal);
       persistSettings();
+      // Mirror to the quick dropdown on the main page.
+      const quickTaal = document.getElementById('quick-taal');
+      if (quickTaal) quickTaal.value = settings.taal;
     });
   }
 
@@ -2051,9 +2159,7 @@ export function initUI(settings) {
     });
   }
 
-  // 6d/6e. Variance + Reverb sliders (Volume A/B removed — replaced by
-  // the overall-volume knob on the main page plus the Balance slider under
-  // Concert Mode).
+  // 6d/6e. Variance + Reverb sliders
   _bindAdvancedSlider('tanpura-variance',  'tanpura-variance-value',  'tanpuraVariance',  (v) => parseInt(v, 10),   (v) => `${v} ct`);
   _bindAdvancedSlider('tanpura-reverb',    'tanpura-reverb-value',    'tanpuraReverb',    (v) => parseInt(v, 10),   (v) => `${v}%`);
 
@@ -2792,6 +2898,11 @@ export function initUI(settings) {
   function startTimerDisplay() {
     _renderTimer(); // immediate tick
     if (timerInterval) clearInterval(timerInterval);
+    // 2-second cadence keeps the audio thread clearer on mobile. Each
+    // tick flushes the practice-tracker and reads localStorage, which
+    // is ~1ms on phones — 1s was adding ~60 wake-ups/min on top of the
+    // scheduler + beat callbacks. 2s is still visibly "live" for a
+    // Completed counter.
     timerInterval = setInterval(_renderTimer, 2000);
   }
   function stopTimerDisplay() {
@@ -2815,7 +2926,11 @@ export function initUI(settings) {
           _playTablaBol(subBol, beatInfo.time + i * subDuration, beatInfo.velocity, subDuration);
         }
       });
+      _playAccentsForMatra(beatInfo.matraIndex, beatInfo.time, beatInfo.velocity, settings.taal);
     }
+    // Advance the on-screen strip so a bandish player can follow the taal
+    // even in free-practice mode (no exercise loaded).
+    _advanceExerciseStrip(beatInfo.matraIndex);
     // Remove current highlight from all cells
     document.querySelectorAll('.beat-cell.current').forEach(c => c.classList.remove('current'));
     // Add highlight to the current matra cell
@@ -2880,6 +2995,12 @@ export function initUI(settings) {
           backgroundAudio.activate('free-practice');
           transportState = 'playing';
           setTransportState('playing');
+          // Reset + show the strip for taal-only follow-along while playing a bandish.
+          _stripPointer = -1;
+          _stripTaalCycleCount = 0;
+          _stripLastMatraIdx = -1;
+          _stripMode = 'taal';
+          _syncExerciseStrip();
           startTimerDisplay();
         } catch (err) {
           console.error('[transport] Start failed:', err, err.stack);
@@ -2934,6 +3055,8 @@ export function initUI(settings) {
           backgroundAudio.deactivate('free-practice');
           document.querySelectorAll('.beat-cell.current').forEach(c => c.classList.remove('current'));
           console.log('[transport] Session stopped:', stats);
+          // Reset + hide strip when free-practice stops (no exercise loaded).
+          _resetExerciseStrip();
         }
         transportState = 'idle';
         setTransportState('idle');
@@ -3391,6 +3514,340 @@ export function initUI(settings) {
     document.querySelectorAll('.main-mode-btn').forEach(b => {
       b.classList.toggle('btn-active', b.dataset.mode === _exMode);
     });
+    _syncExerciseStrip();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Exercise scroll-strip (main page)
+  //
+  // Renders a 5-cell horizontal strip below the Demo/Practice/Test buttons
+  // showing the currently-playing matra in the centre, two past matras on
+  // the left, and two upcoming matras on the right. The strip advances one
+  // cell per beat — updates happen on the same callback that schedules
+  // tabla/swara playback, so it stays in sync with the rhythm.
+  //
+  // Hidden entirely unless an exercise is loaded (free tabla-only practice
+  // does not show the strip).
+  // ---------------------------------------------------------------------------
+
+  /** Absolute playlist pointer; -1 means "before start / stopped". */
+  let _stripPointer = -1;
+  /**
+   * Cycle counter used only in taal-only mode (no exercise) so the strip's
+   * "past" cells can show the previous cycle's matras as it wraps.
+   */
+  let _stripTaalCycleCount = 0;
+  let _stripLastMatraIdx = -1;
+  /**
+   * What the strip is currently showing:
+   *   'idle'     — hidden / blank
+   *   'taal'     — tabla-only (no swaras): set by tempo button or free practice
+   *   'exercise' — exercise cells with swaras: set by the exercise Start button
+   * Pause is intentionally a no-op so the mode persists across pauses.
+   */
+  let _stripMode = 'idle';
+
+  /**
+   * Show or hide the strip based on whether an exercise is loaded OR tabla
+   * is playing in free mode. When tabla plays without an exercise, cells
+   * still show matra number, tpi, bol, and accents — just no swaras (the
+   * user is playing their own bandish).
+   */
+  function _syncExerciseStrip() {
+    const strip = document.getElementById('exercise-strip');
+    if (!strip) return;
+    // Only show while something is actually playing (or paused) — neither
+    // loading an exercise nor selecting a taal alone triggers the strip.
+    const visible = _stripMode !== 'idle';
+    strip.style.display = visible ? '' : 'none';
+    if (visible) {
+      _renderExerciseStrip();
+    }
+  }
+
+  /**
+   * Compute the beat descriptor at `targetPointer`.
+   *
+   * In exercise mode, the pointer is absolute across (all aroha cycles then
+   * all avaroha cycles) and returns section / cycleIdx / beat for lookup.
+   *
+   * In taal-only mode (tabla playing without an exercise), the pointer
+   * just wraps around the current taal; section / cycleIdx / beat are
+   * null, so the cell renders without a swara or section badge.
+   */
+  function _computeStripBeatAt(targetPointer) {
+    if (targetPointer < 0) return null;
+
+    // Exercise mode is used only when the strip was entered via Exercise
+    // Start. Tempo / free-practice use taal-only mode so no swaras show,
+    // even if an exercise happens to be loaded.
+    if (_stripMode === 'exercise' && _exLoadedExercise) {
+      const taalDef = TAAL_DEFINITIONS[_exLoadedExercise.taalId];
+      if (!taalDef) return null;
+      const totalBeats = taalDef.beats;
+
+      const arohaCycles = _exLoadedExercise.arohaCycles || [];
+      const avarohaCycles = _exLoadedExercise.avarohaCycles || [];
+      const arohaTotal = arohaCycles.length * totalBeats;
+      const avarohaTotal = avarohaCycles.length * totalBeats;
+      if (targetPointer >= arohaTotal + avarohaTotal) return null;
+
+      let section, cycleIdx, matraIdx, cycles;
+      if (targetPointer < arohaTotal) {
+        section = 'aroha';
+        cycleIdx = Math.floor(targetPointer / totalBeats);
+        matraIdx = targetPointer % totalBeats;
+        cycles = arohaCycles;
+      } else {
+        section = 'avaroha';
+        const rel = targetPointer - arohaTotal;
+        cycleIdx = Math.floor(rel / totalBeats);
+        matraIdx = rel % totalBeats;
+        cycles = avarohaCycles;
+      }
+
+      const cycle = cycles[cycleIdx];
+      const beat = (cycle && Array.isArray(cycle.beats)) ? cycle.beats[matraIdx] : null;
+      return { section, cycleIdx, matraIdx, beat, taalDef, totalCycles: cycles.length, isTaalOnly: false };
+    }
+
+    // Taal-only mode — wrap around within the active taal.
+    const taalId = settings.taal || (_exLoadedExercise ? _exLoadedExercise.taalId : null);
+    const taalDef = taalId ? TAAL_DEFINITIONS[taalId] : null;
+    if (!taalDef) return null;
+    const totalBeats = taalDef.beats;
+    const matraIdx = ((targetPointer % totalBeats) + totalBeats) % totalBeats;
+    return { section: null, cycleIdx: null, matraIdx, beat: null, taalDef, totalCycles: 0, isTaalOnly: true };
+  }
+
+  /** Format the tpi marker for a given matra (X, tali number, or 0). */
+  function _tpiForMatra(taalDef, matraIdx) {
+    if (!taalDef) return '';
+    let consumed = 0;
+    for (let v = 0; v < taalDef.vibhag.length; v++) {
+      const size = taalDef.vibhag[v];
+      if (matraIdx === consumed) return taalDef.tpiSequence[v] || '';
+      consumed += size;
+    }
+    return '';
+  }
+
+  /** Render the 5 cells of the exercise strip using the current pointer. */
+  function _renderExerciseStrip() {
+    const strip = document.getElementById('exercise-strip');
+    if (!strip) return;
+
+    // Either an exercise is loaded, or tabla is playing — otherwise no
+    // taal context to render.
+    const taalIdForStrip = _exLoadedExercise ? _exLoadedExercise.taalId : settings.taal;
+    if (!taalIdForStrip) return;
+
+    const thaat = settings.thaat || 'bilawal';
+    // When idle, centre the preview on matra 0 so the user sees what
+    // they're about to play.
+    const effectivePointer = _stripPointer < 0 ? 0 : _stripPointer;
+    // Resolve bols + accents once per render (reads localStorage); reused across cells.
+    const activeBols = _getActiveBols(taalIdForStrip);
+    const activeAccents = _getActiveAccents(taalIdForStrip);
+
+    for (let slot = 0; slot < 5; slot++) {
+      const cell = strip.querySelector(`.ex-strip-cell[data-slot="${slot}"]`);
+      if (!cell) continue;
+      const offset = slot - 2; // slot 2 is NOW
+      const ptr = effectivePointer + offset;
+      const info = _computeStripBeatAt(ptr);
+
+      // Clear prior classes/content
+      cell.innerHTML = '';
+      cell.classList.remove('past', 'future', 'empty');
+      cell.classList.toggle('now', slot === 2);
+
+      if (!info) {
+        cell.classList.add('empty');
+        continue;
+      }
+
+      if (offset < 0) cell.classList.add('past');
+      else if (offset > 0) cell.classList.add('future');
+
+      const { section, cycleIdx, matraIdx, beat, taalDef, totalCycles } = info;
+
+      // Top-row: matra number + tpi marker
+      const meta = document.createElement('div');
+      meta.className = 'ex-strip-meta';
+      const matraNum = document.createElement('span');
+      matraNum.className = 'ex-strip-matra-num';
+      matraNum.textContent = `${matraIdx + 1}/${taalDef.beats}`;
+      const tpi = _tpiForMatra(taalDef, matraIdx);
+      const tpiEl = document.createElement('span');
+      tpiEl.classList.add('ex-strip-tpi');
+      if (tpi === 'X' || tpi === '0') {
+        tpiEl.classList.add(`tpi-${tpi}`);
+      } else if (tpi) {
+        // Numeric tali markers (1, 2, 3, …) share a colour class.
+        tpiEl.classList.add('tpi-num');
+      }
+      tpiEl.textContent = tpi || '';
+      meta.appendChild(matraNum);
+      meta.appendChild(tpiEl);
+      cell.appendChild(meta);
+
+      // Main swara(s)
+      const swaraEl = document.createElement('div');
+      swaraEl.className = 'ex-strip-swara';
+      let swaraText = '—';
+      if (beat && Array.isArray(beat.positions) && beat.positions.length > 0) {
+        const labels = beat.positions.map(p => {
+          if (p === '_') return '—';
+          if (p == null) return '·';
+          return getPositionLabel(p, thaat, 'english');
+        });
+        swaraText = labels.join(' ');
+        if (labels.length >= 2) swaraEl.classList.add('multi');
+      }
+      swaraEl.textContent = swaraText;
+      cell.appendChild(swaraEl);
+
+      // Row: tabla bol(s) for this matra
+      const bolArr = activeBols[matraIdx] || [];
+      if (bolArr.length > 0) {
+        const bolEl = document.createElement('div');
+        bolEl.className = 'ex-strip-bol';
+        bolEl.textContent = bolArr.filter(b => b && b !== 'x').join(' ');
+        cell.appendChild(bolEl);
+      }
+
+      // Row: accent markers (manjira / ghungroo / tali …) for this matra.
+      const matraAccents = activeAccents[matraIdx] || [];
+      if (matraAccents.length > 0) {
+        const row = document.createElement('div');
+        row.className = 'ex-strip-accents';
+        matraAccents.forEach(key => {
+          const dot = document.createElement('span');
+          dot.classList.add('accent-dot', `accent-${key}`);
+          dot.title = (ACCENT_LABELS && ACCENT_LABELS[key]) || key;
+          dot.textContent = (key.charAt(0) || '·').toLowerCase();
+          row.appendChild(dot);
+        });
+        cell.appendChild(row);
+      }
+
+      // Section badge — shown on the first matra of each cycle so the
+      // Aroha → Avaroha transition stands out as it scrolls through.
+      if (matraIdx === 0) {
+        const badge = document.createElement('div');
+        badge.classList.add('ex-strip-section-badge');
+        if (section === 'avaroha') badge.classList.add('avaroha');
+        const label = section === 'aroha' ? 'Aroha' : 'Avaroha';
+        badge.textContent = totalCycles > 1 ? `${label} ${cycleIdx + 1}` : label;
+        cell.appendChild(badge);
+      }
+    }
+  }
+
+  /**
+   * Advance the strip pointer using current exercise state. Called from
+   * the exercise engine's onBeat callback (exercise mode) or the tabla
+   * quick-toggle engine's onBeat (taal-only mode).
+   */
+  function _advanceExerciseStrip(matraIndex) {
+    if (_stripMode === 'exercise' && _exLoadedExercise) {
+      const taalDef = TAAL_DEFINITIONS[_exLoadedExercise.taalId];
+      if (!taalDef) return;
+      const totalBeats = taalDef.beats;
+      const arohaTotal = (_exLoadedExercise.arohaCycles || []).length * totalBeats;
+
+      if (_exCurrentSection === 'aroha') {
+        _stripPointer = _exCurrentCycleIdx * totalBeats + matraIndex;
+      } else {
+        _stripPointer = arohaTotal + _exCurrentCycleIdx * totalBeats + matraIndex;
+      }
+    } else if (_stripMode === 'taal') {
+      // Track cycle wraps locally so past cells show the previous cycle
+      // as the strip scrolls.
+      const taalId = settings.taal || (_exLoadedExercise ? _exLoadedExercise.taalId : null);
+      const taalDef = taalId ? TAAL_DEFINITIONS[taalId] : null;
+      if (!taalDef) return;
+      if (_stripLastMatraIdx < 0) {
+        _stripTaalCycleCount = 0;
+      } else if (matraIndex === 0 && _stripLastMatraIdx > 0) {
+        _stripTaalCycleCount++;
+      }
+      _stripLastMatraIdx = matraIndex;
+      _stripPointer = _stripTaalCycleCount * taalDef.beats + matraIndex;
+    } else {
+      // Idle: nothing to advance.
+      return;
+    }
+    _renderExerciseStrip();
+  }
+
+  /** Stop/reset the strip — called from Stop handlers. */
+  function _resetExerciseStrip() {
+    _stripPointer = -1;
+    _stripTaalCycleCount = 0;
+    _stripLastMatraIdx = -1;
+    _stripMode = 'idle';
+    _syncExerciseStrip();
+  }
+
+  // --------------------------------------------------------------------
+  // Exercise / taal coupling helpers
+  //
+  // Rules:
+  //   1. Changing the main-page taal to a DIFFERENT taal than the loaded
+  //      exercise clears the exercise.
+  //   2. Changing only the taal variation (same base taal) keeps the
+  //      exercise — variation changes update settings.taalVariation, not
+  //      settings.taal, so they don't trigger this logic.
+  //   3. Loading a new exercise whose taal differs from the main-page
+  //      taal switches the main-page taal to the exercise's default.
+  // --------------------------------------------------------------------
+
+  function _clearLoadedExercise() {
+    // Stop exercise playback first if it's running.
+    if (_exPlaying) {
+      const btnExStop = document.getElementById('btn-ex-stop');
+      if (btnExStop && !btnExStop.disabled) btnExStop.click();
+    }
+    settings.currentExerciseId = null;
+    _exLoadedExercise = null;
+    _stripPointer = -1;
+    _stripMode = 'idle';
+    const display = document.getElementById('exercise-display');
+    if (display) display.textContent = 'None';
+    persistSettings();
+    _syncMainModeBar();
+  }
+
+  function _clearExerciseIfTaalMismatch(newTaalId) {
+    if (_exLoadedExercise && _exLoadedExercise.taalId !== newTaalId) {
+      _clearLoadedExercise();
+    }
+  }
+
+  /**
+   * Apply an exercise selection: sync the main-page taal (and variation)
+   * to the exercise's defaults when they don't already match.
+   */
+  function _syncMainTaalToExercise(exercise) {
+    if (!exercise || !exercise.taalId) return;
+    if (settings.taal === exercise.taalId) return;
+    settings.taal = exercise.taalId;
+    settings.taalVariation = 'default';
+    _populateVariationDropdown(settings.taal);
+    // Mirror to any dropdowns that track the main taal.
+    const quickTaal = document.getElementById('quick-taal');
+    if (quickTaal) quickTaal.value = settings.taal;
+    const modalTaal = document.getElementById('setting-taal');
+    if (modalTaal) modalTaal.value = settings.taal;
+    renderBeatGrid(settings.taal);
+    updateSettingsSummary(settings);
+    // Push the change to any running engines so playback follows the swap.
+    if (tablaTaalEngine && tablaPlaying) tablaTaalEngine.setTaal(settings.taal);
+    if (practiceSession && practiceSession.taalEngine && practiceSession.state === 'playing') {
+      practiceSession.taalEngine.setTaal(settings.taal);
+    }
   }
 
   // Initialize exercise display from saved settings
@@ -3399,6 +3856,9 @@ export function initUI(settings) {
     const ex = exercises.find(e => e.id === settings.currentExerciseId);
     const display = document.getElementById('exercise-display');
     if (display) display.textContent = ex ? ex.name : 'None';
+    // Pre-load the exercise object so the strip's initial preview can
+    // render before Start is pressed.
+    if (ex && !_exLoadedExercise) _exLoadedExercise = ex;
   }
   _syncMainModeBar();
 
@@ -3425,6 +3885,9 @@ export function initUI(settings) {
     const thaat = opts.thaat || settings.thaat || 'bilawal';
     const notation = 'english';
     const cellIdPrefix = opts.cellIdPrefix || '';
+    const editable = !!opts.editable;
+    const selectedMatra = (typeof opts.selectedMatra === 'number') ? opts.selectedMatra : null;
+    const onCellClick = opts.onCellClick;
 
     let matraIndex = 0;
     for (let v = 0; v < taalDef.vibhag.length; v++) {
@@ -3455,6 +3918,8 @@ export function initUI(settings) {
         const cell = document.createElement('div');
         cell.classList.add('matra-cell');
         if (cellIdPrefix) cell.id = `${cellIdPrefix}-${idx}`;
+        if (editable) cell.classList.add('editable');
+        if (selectedMatra === idx) cell.classList.add('selected');
 
         // Beat type tint: first cell of Sam/Tali vibhag, ALL cells of Khali vibhag
         if (marker === 'X' && m === 0) cell.classList.add('beat-sam');
@@ -3489,6 +3954,10 @@ export function initUI(settings) {
           bolsSpan.textContent = '-';
         }
         cell.appendChild(bolsSpan);
+
+        if (editable && onCellClick) {
+          cell.addEventListener('click', () => onCellClick(idx));
+        }
 
         row.appendChild(cell);
         matraIndex++;
@@ -3662,7 +4131,14 @@ export function initUI(settings) {
         `;
 
         item.querySelector('.ex-info').addEventListener('click', () => {
+          const changed = settings.currentExerciseId !== ex.id;
           settings.currentExerciseId = ex.id;
+          if (changed || !_exLoadedExercise || _exLoadedExercise.id !== ex.id) {
+            _exLoadedExercise = ex;
+            _stripPointer = -1;
+          }
+          // Switch main-page taal to the exercise's taal when they differ.
+          _syncMainTaalToExercise(ex);
           const display = document.getElementById('exercise-display');
           if (display) display.textContent = ex.name || 'Exercise';
           persistSettings();
@@ -3683,9 +4159,12 @@ export function initUI(settings) {
             _saveExercises(all);
             if (settings.currentExerciseId === ex.id) {
               settings.currentExerciseId = null;
+              _exLoadedExercise = null;
+              _stripPointer = -1;
               const display = document.getElementById('exercise-display');
               if (display) display.textContent = 'None';
               persistSettings();
+              _syncMainModeBar();
             }
             _buildExerciseList();
           }
@@ -3770,9 +4249,18 @@ export function initUI(settings) {
    * @param {Object} generated - Output from generateFromCompactPattern
    * @param {string} [prefix] - Container prefix: '' for designer, 'ex-edit-' for edit page
    */
-  function _renderExercisePreview(taalId, generated, prefix = '') {
+  function _renderExercisePreview(taalId, generated, prefix = '', opts = {}) {
     const arohaContainer = document.getElementById(prefix ? `${prefix}preview-aroha` : 'ex-preview-aroha');
     const avarohaContainer = document.getElementById(prefix ? `${prefix}preview-avaroha` : 'ex-preview-avaroha');
+
+    const editable = !!opts.editable;
+    const selection = opts.selection || null;
+    const onCellClick = opts.onCellClick;
+
+    const sectionSelectedMatra = (section, cycleIdx) =>
+      (editable && selection && selection.section === section && selection.cycleIdx === cycleIdx)
+        ? selection.matraIdx
+        : null;
 
     if (arohaContainer) {
       arohaContainer.innerHTML = '';
@@ -3784,7 +4272,11 @@ export function initUI(settings) {
         const tableDiv = document.createElement('div');
         tableDiv.style.marginBottom = '8px';
         arohaContainer.appendChild(tableDiv);
-        _renderExerciseTaalTable(tableDiv, taalId, cycle.beats);
+        _renderExerciseTaalTable(tableDiv, taalId, cycle.beats, {
+          editable,
+          selectedMatra: sectionSelectedMatra('aroha', i),
+          onCellClick: onCellClick ? (matraIdx) => onCellClick('aroha', i, matraIdx) : null,
+        });
       });
       if (generated.arohaCycles.length === 0) {
         arohaContainer.innerHTML = '<p style="color:var(--text-dim); font-size:0.8rem;">No aroha cycles generated for this range/pattern.</p>';
@@ -3801,12 +4293,182 @@ export function initUI(settings) {
         const tableDiv = document.createElement('div');
         tableDiv.style.marginBottom = '8px';
         avarohaContainer.appendChild(tableDiv);
-        _renderExerciseTaalTable(tableDiv, taalId, cycle.beats);
+        _renderExerciseTaalTable(tableDiv, taalId, cycle.beats, {
+          editable,
+          selectedMatra: sectionSelectedMatra('avaroha', i),
+          onCellClick: onCellClick ? (matraIdx) => onCellClick('avaroha', i, matraIdx) : null,
+        });
       });
       if (generated.avarohaCycles.length === 0) {
         avarohaContainer.innerHTML = '<p style="color:var(--text-dim); font-size:0.8rem;">No avaroha cycles generated for this range/pattern.</p>';
       }
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Inline cell editor for exercise preview (designer + edit pages)
+  //
+  // A user can tap any matra cell in the generated aroha/avaroha tables and
+  // modify the notes directly — adds to the positions array (up to 4), taps on
+  // a chip remove the note, Clear empties the matra. A "manually edited" badge
+  // appears once any cell has been changed; regenerating still works and will
+  // overwrite the manual edits (user confirmed this is the desired behaviour).
+  // ---------------------------------------------------------------------------
+
+  const _EXERCISE_EDITOR_MAX_NOTES_PER_MATRA = 4;
+
+  const _exerciseEditors = {
+    // prefix → state bag. `generatedRef()` returns the live `generated` object
+    // from the corresponding _exDesignerGenerated / _exEditGenerated wrapper
+    // (so mutations flow into saves automatically).
+    designer: {
+      prefix: '',
+      selection: null,             // { section: 'aroha'|'avaroha', cycleIdx, matraIdx }
+      manuallyEdited: false,
+      badgeId: 'ex-manually-edited-badge',
+      pickerPanelId: 'ex-note-picker-panel',
+      chipsId: 'ex-note-chips',
+      paletteId: 'ex-note-palette',
+      labelId: 'ex-selected-matra-label',
+      clearBtnId: 'btn-ex-note-clear',
+      closeBtnId: 'btn-ex-note-close',
+      getContext: () => _exDesignerGenerated,
+    },
+    edit: {
+      prefix: 'ex-edit-',
+      selection: null,
+      manuallyEdited: false,
+      badgeId: 'ex-edit-manually-edited-badge',
+      pickerPanelId: 'ex-edit-note-picker-panel',
+      chipsId: 'ex-edit-note-chips',
+      paletteId: 'ex-edit-note-palette',
+      labelId: 'ex-edit-selected-matra-label',
+      clearBtnId: 'btn-ex-edit-note-clear',
+      closeBtnId: 'btn-ex-edit-note-close',
+      getContext: () => _exEditGenerated,
+    },
+  };
+
+  function _resetExerciseEditorState(editorKey) {
+    const ed = _exerciseEditors[editorKey];
+    if (!ed) return;
+    ed.selection = null;
+    ed.manuallyEdited = false;
+  }
+
+  function _renderExerciseEditor(editorKey) {
+    const ed = _exerciseEditors[editorKey];
+    if (!ed) return;
+    const ctx = ed.getContext();
+    if (!ctx || !ctx.generated) return;
+
+    const taalId = ctx.taalId || (_exEditPageExercise ? _exEditPageExercise.taalId : null);
+    if (!taalId) return;
+
+    _renderExercisePreview(taalId, ctx.generated, ed.prefix, {
+      editable: true,
+      selection: ed.selection,
+      onCellClick: (section, cycleIdx, matraIdx) => {
+        ed.selection = { section, cycleIdx, matraIdx };
+        _renderExerciseEditor(editorKey);
+      },
+    });
+
+    _renderExerciseNotePicker(editorKey);
+
+    const badge = document.getElementById(ed.badgeId);
+    if (badge) badge.style.display = ed.manuallyEdited ? '' : 'none';
+  }
+
+  function _renderExerciseNotePicker(editorKey) {
+    const ed = _exerciseEditors[editorKey];
+    if (!ed) return;
+    const panel = document.getElementById(ed.pickerPanelId);
+    const chips = document.getElementById(ed.chipsId);
+    const palette = document.getElementById(ed.paletteId);
+    const label = document.getElementById(ed.labelId);
+    if (!panel || !chips || !palette) return;
+
+    const ctx = ed.getContext();
+    const sel = ed.selection;
+    if (!sel || !ctx || !ctx.generated) {
+      panel.style.display = 'none';
+      return;
+    }
+
+    const cycles = (sel.section === 'aroha') ? ctx.generated.arohaCycles : ctx.generated.avarohaCycles;
+    const cycle = cycles && cycles[sel.cycleIdx];
+    const beat = cycle && cycle.beats[sel.matraIdx];
+    if (!beat) {
+      panel.style.display = 'none';
+      return;
+    }
+
+    panel.style.display = '';
+
+    const sectionLabel = sel.section === 'aroha' ? 'Aroha' : 'Avaroha';
+    if (label) label.textContent = `— ${sectionLabel} · Cycle ${sel.cycleIdx + 1} · Matra ${sel.matraIdx + 1}`;
+
+    const thaat = settings.thaat || 'bilawal';
+    const rangeStart = ctx.rangeStart || 1;
+    const rangeEnd = ctx.rangeEnd || 15;
+
+    // Chips: current positions in this matra
+    chips.innerHTML = '';
+    const positions = beat.positions || [];
+    if (positions.length === 0) {
+      const hint = document.createElement('span');
+      hint.style.cssText = 'color:var(--text-dim); font-size:0.8rem;';
+      hint.textContent = 'Empty — tap a swara below to add';
+      chips.appendChild(hint);
+    } else {
+      positions.forEach((p, i) => {
+        const chip = document.createElement('span');
+        chip.classList.add('bol-chip');
+        const labelText = (p === '_') ? '—' : (p == null ? '·' : getPositionLabel(p, thaat, 'english'));
+        chip.innerHTML = `${labelText} <span class="chip-remove">\u2715</span>`;
+        chip.addEventListener('click', () => {
+          beat.positions.splice(i, 1);
+          ed.manuallyEdited = true;
+          _renderExerciseEditor(editorKey);
+        });
+        chips.appendChild(chip);
+      });
+    }
+
+    // Palette: swara buttons for the exercise's range + rest + sustain
+    palette.innerHTML = '';
+    const addBtn = (text, title, onClick) => {
+      const btn = document.createElement('button');
+      btn.classList.add('bol-btn');
+      btn.textContent = text;
+      if (title) btn.title = title;
+      btn.addEventListener('click', onClick);
+      palette.appendChild(btn);
+    };
+
+    for (let pos = rangeStart; pos <= rangeEnd; pos++) {
+      addBtn(getPositionLabel(pos, thaat, 'english'), `Position ${pos}`, () => {
+        if ((beat.positions || []).length >= _EXERCISE_EDITOR_MAX_NOTES_PER_MATRA) return;
+        if (!beat.positions) beat.positions = [];
+        beat.positions.push(pos);
+        ed.manuallyEdited = true;
+        _renderExerciseEditor(editorKey);
+      });
+    }
+    // Rest and sustain controls
+    addBtn('·', 'Rest (silence)', () => {
+      beat.positions = [null];
+      ed.manuallyEdited = true;
+      _renderExerciseEditor(editorKey);
+    });
+    addBtn('—', 'Sustain previous note', () => {
+      if ((beat.positions || []).length >= _EXERCISE_EDITOR_MAX_NOTES_PER_MATRA) return;
+      if (!beat.positions) beat.positions = [];
+      beat.positions.push('_');
+      ed.manuallyEdited = true;
+      _renderExerciseEditor(editorKey);
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -3868,9 +4530,8 @@ export function initUI(settings) {
 
         // Level
         _exSelectedLevel = ex.competency || 'beginner';
-        document.querySelectorAll('.ex-level-btn').forEach(btn => {
-          btn.classList.toggle('btn-active', btn.dataset.level === _exSelectedLevel);
-        });
+        const levelSelect = document.getElementById('ex-level-select');
+        if (levelSelect) levelSelect.value = _exSelectedLevel;
 
         // Populate compact notation if available
         if (patternInput) {
@@ -3889,9 +4550,8 @@ export function initUI(settings) {
       if (endSelect) endSelect.value = 11;
 
       _exSelectedLevel = 'beginner';
-      document.querySelectorAll('.ex-level-btn').forEach(btn => {
-        btn.classList.toggle('btn-active', btn.dataset.level === 'beginner');
-      });
+      const levelSelect = document.getElementById('ex-level-select');
+      if (levelSelect) levelSelect.value = 'beginner';
 
       if (patternInput) patternInput.value = '';
 
@@ -3914,54 +4574,74 @@ export function initUI(settings) {
     });
   }
 
-  // Level buttons
-  document.querySelectorAll('.ex-level-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.ex-level-btn').forEach(b => b.classList.remove('btn-active'));
-      btn.classList.add('btn-active');
-      _exSelectedLevel = btn.dataset.level;
-    });
-  });
-
-  // Generate button (compact pattern)
-  const btnGenerateExercise = document.getElementById('btn-generate-exercise');
-  if (btnGenerateExercise) {
-    btnGenerateExercise.addEventListener('click', () => {
-      const input = document.getElementById('ex-pattern-input')?.value || '';
-      const taalId = document.getElementById('ex-taal-select')?.value || 'teentaal';
-      const errorEl = document.getElementById('ex-pattern-error');
-
-      const parsed = parseCompactPattern(input, taalId);
-      if (parsed.error) {
-        if (errorEl) {
-          errorEl.textContent = parsed.error;
-          errorEl.style.display = '';
-        }
-        return;
-      }
-      if (errorEl) errorEl.style.display = 'none';
-
-      const rangeStart = parseInt(document.getElementById('ex-start-note')?.value || '4', 10);
-      const rangeEnd = parseInt(document.getElementById('ex-end-note')?.value || '11', 10);
-
-      const generated = generateFromCompactPattern({ parsed, rangeStart, rangeEnd });
-
-      // Render preview tables
-      _renderExercisePreview(taalId, generated);
-      const previewContainer = document.getElementById('ex-preview-container');
-      if (previewContainer) previewContainer.style.display = '';
-
-      // Store for saving
-      _exDesignerGenerated = { parsed, generated, taalId, rangeStart, rangeEnd };
-
-      // Auto-generate name if empty — `<taalId>_<b|i|a><n>` where n is the
-      // next free number for this (taalId, level) pair.
-      const nameInput = document.getElementById('ex-save-name');
-      if (nameInput && !nameInput.value.trim()) {
-        nameInput.value = _makeExerciseName(taalId, _exSelectedLevel);
-      }
+  // Level dropdown
+  const levelSelectDesigner = document.getElementById('ex-level-select');
+  if (levelSelectDesigner) {
+    levelSelectDesigner.addEventListener('change', () => {
+      _exSelectedLevel = levelSelectDesigner.value || 'beginner';
     });
   }
+
+  /**
+   * Shared implementation for both Designer buttons.
+   *
+   * @param {'first-plus-1' | 'last-plus-1'} mode
+   */
+  function _generateDesignerExercise(mode) {
+    const input = document.getElementById('ex-pattern-input')?.value || '';
+    const taalId = document.getElementById('ex-taal-select')?.value || 'teentaal';
+    const errorEl = document.getElementById('ex-pattern-error');
+    const rangeStart = parseInt(document.getElementById('ex-start-note')?.value || '4', 10);
+    const rangeEnd = parseInt(document.getElementById('ex-end-note')?.value || '11', 10);
+
+    let parsed, generated;
+    if (mode === 'last-plus-1') {
+      // Permissive seed parse — any short fragment is fine.
+      parsed = parseCompactPatternSeed(input);
+      if (parsed.error) { _showExDesignerError(parsed.error); return; }
+      generated = generateFromCompactPatternLastPlusOne({
+        seedInput: input, taalId, rangeStart, rangeEnd,
+      });
+      if (generated.error) { _showExDesignerError(generated.error); return; }
+    } else {
+      // Strict parse — must fit the taal's vibhag structure exactly.
+      parsed = parseCompactPattern(input, taalId);
+      if (parsed.error) { _showExDesignerError(parsed.error); return; }
+      generated = generateFromCompactPattern({ parsed, rangeStart, rangeEnd });
+    }
+
+    if (errorEl) errorEl.style.display = 'none';
+
+    // Store for saving — include the mode so the edit flow knows how to regenerate.
+    _exDesignerGenerated = { parsed, generated, taalId, rangeStart, rangeEnd, extensionMode: mode };
+
+    // Regeneration resets any manual-edit state on the preview.
+    _resetExerciseEditorState('designer');
+
+    const previewContainer = document.getElementById('ex-preview-container');
+    if (previewContainer) previewContainer.style.display = '';
+    _renderExerciseEditor('designer');
+
+    // Auto-generate name if empty — `<taalId>_<b|i|a><n>` where n is the
+    // next free number for this (taalId, level) pair.
+    const nameInput = document.getElementById('ex-save-name');
+    if (nameInput && !nameInput.value.trim()) {
+      nameInput.value = _makeExerciseName(taalId, _exSelectedLevel);
+    }
+  }
+
+  function _showExDesignerError(msg) {
+    const errorEl = document.getElementById('ex-pattern-error');
+    if (errorEl) {
+      errorEl.textContent = msg;
+      errorEl.style.display = '';
+    }
+  }
+
+  const btnGenFirstPlus1 = document.getElementById('btn-generate-first-plus-1');
+  if (btnGenFirstPlus1) btnGenFirstPlus1.addEventListener('click', () => _generateDesignerExercise('first-plus-1'));
+  const btnGenLastPlus1 = document.getElementById('btn-generate-last-plus-1');
+  if (btnGenLastPlus1) btnGenLastPlus1.addEventListener('click', () => _generateDesignerExercise('last-plus-1'));
 
   // Save exercise (designer)
   function _saveExerciseFromDesigner(forceNew) {
@@ -3972,9 +4652,19 @@ export function initUI(settings) {
 
     const nameInput = document.getElementById('ex-save-name');
     const name = nameInput?.value.trim() || 'Unnamed Exercise';
-    const { parsed, generated, taalId, rangeStart, rangeEnd } = _exDesignerGenerated;
+    const { parsed, generated, taalId, rangeStart, rangeEnd, extensionMode } = _exDesignerGenerated;
 
-    const laykari = _detectLaykari(parsed.beatStructure);
+    // For First+1, laykari comes from the seed's full-cycle beatStructure.
+    // For Last+1, the seed is partial — use the generated extended structure.
+    const effectiveBeatStructure = generated.beatStructure || parsed.beatStructure;
+    const laykari = _detectLaykari(effectiveBeatStructure);
+
+    // compactNotation semantics:
+    //   - First+1: full compact string for the cycle.
+    //   - Last+1:  seed only (as typed) — the generated cycles carry the expansion.
+    const compactNotation = (extensionMode === 'last-plus-1')
+      ? (generated.compactNotation ?? '')
+      : compactPatternToString(parsed.vibhags);
 
     const exerciseObj = {
       id: (!forceNew && _exEditingId) ? _exEditingId : Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
@@ -3985,10 +4675,12 @@ export function initUI(settings) {
       laykari,
       competency: _exSelectedLevel,
       patternType: 'compact',
-      compactNotation: compactPatternToString(parsed.vibhags),
-      beatStructure: parsed.beatStructure,
+      extensionMode: extensionMode || 'first-plus-1',
+      compactNotation,
+      beatStructure: effectiveBeatStructure,
       arohaCycles: generated.arohaCycles,
       avarohaCycles: generated.avarohaCycles,
+      manuallyEdited: _exerciseEditors.designer.manuallyEdited || false,
       createdAt: new Date().toISOString(),
     };
 
@@ -4025,6 +4717,35 @@ export function initUI(settings) {
   if (btnSaveExerciseAs) {
     btnSaveExerciseAs.addEventListener('click', () => _saveExerciseFromDesigner(true));
   }
+
+  // Note-picker Clear/Done buttons (designer + edit pages).
+  function _wireExerciseEditorPickerButtons(editorKey) {
+    const ed = _exerciseEditors[editorKey];
+    if (!ed) return;
+    const clearBtn = document.getElementById(ed.clearBtnId);
+    const closeBtn = document.getElementById(ed.closeBtnId);
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        const ctx = ed.getContext();
+        const sel = ed.selection;
+        if (!ctx || !ctx.generated || !sel) return;
+        const cycles = (sel.section === 'aroha') ? ctx.generated.arohaCycles : ctx.generated.avarohaCycles;
+        const beat = cycles && cycles[sel.cycleIdx] && cycles[sel.cycleIdx].beats[sel.matraIdx];
+        if (!beat) return;
+        beat.positions = [];
+        ed.manuallyEdited = true;
+        _renderExerciseEditor(editorKey);
+      });
+    }
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        ed.selection = null;
+        _renderExerciseEditor(editorKey);
+      });
+    }
+  }
+  _wireExerciseEditorPickerButtons('designer');
+  _wireExerciseEditorPickerButtons('edit');
 
   // ---------------------------------------------------------------------------
   // Exercise Edit Page
@@ -4103,48 +4824,81 @@ export function initUI(settings) {
     const previewContainer = document.getElementById('ex-edit-preview-container');
     if (exercise.arohaCycles && exercise.arohaCycles.length > 0) {
       if (previewContainer) previewContainer.style.display = '';
-      // Use existing exercise data directly
-      _renderExercisePreview(exercise.taalId, {
-        arohaCycles: exercise.arohaCycles,
-        avarohaCycles: exercise.avarohaCycles || [],
-      }, 'ex-edit-');
+
+      // Seed _exEditGenerated with a deep copy of the saved cycles so cell
+      // edits are possible without a regeneration. Deep copy avoids mutating
+      // the stored exercise until the user clicks Save.
+      const deepClone = (v) => JSON.parse(JSON.stringify(v));
+      _exEditGenerated = {
+        parsed: null,
+        generated: {
+          arohaCycles: deepClone(exercise.arohaCycles),
+          avarohaCycles: deepClone(exercise.avarohaCycles || []),
+          beatStructure: exercise.beatStructure ? deepClone(exercise.beatStructure) : undefined,
+          compactNotation: exercise.compactNotation || '',
+        },
+        taalId: exercise.taalId,
+        rangeStart: exercise.rangeStart || 4,
+        rangeEnd: exercise.rangeEnd || 11,
+        extensionMode: exercise.extensionMode || 'first-plus-1',
+      };
+      _resetExerciseEditorState('edit');
+      _renderExerciseEditor('edit');
     } else {
+      _exEditGenerated = null;
+      _resetExerciseEditorState('edit');
       if (previewContainer) previewContainer.style.display = 'none';
     }
   }
 
-  // Regenerate button on edit page
-  const btnRegenerateExercise = document.getElementById('btn-regenerate-exercise');
-  if (btnRegenerateExercise) {
-    btnRegenerateExercise.addEventListener('click', () => {
-      if (!_exEditPageExercise) return;
+  /** Shared implementation for both Edit-page regenerate buttons. */
+  function _regenerateEditExercise(mode) {
+    if (!_exEditPageExercise) return;
 
-      const input = document.getElementById('ex-edit-pattern-input')?.value || '';
-      const taalId = _exEditPageExercise.taalId;
-      const errorEl = document.getElementById('ex-edit-pattern-error');
+    const input = document.getElementById('ex-edit-pattern-input')?.value || '';
+    const taalId = _exEditPageExercise.taalId;
+    const errorEl = document.getElementById('ex-edit-pattern-error');
+    const rangeStart = parseInt(document.getElementById('ex-edit-start-note')?.value || '4', 10);
+    const rangeEnd = parseInt(document.getElementById('ex-edit-end-note')?.value || '11', 10);
 
-      const parsed = parseCompactPattern(input, taalId);
-      if (parsed.error) {
-        if (errorEl) {
-          errorEl.textContent = parsed.error;
-          errorEl.style.display = '';
-        }
-        return;
-      }
-      if (errorEl) errorEl.style.display = 'none';
+    let parsed, generated;
+    if (mode === 'last-plus-1') {
+      parsed = parseCompactPatternSeed(input);
+      if (parsed.error) { _showExEditError(parsed.error); return; }
+      generated = generateFromCompactPatternLastPlusOne({
+        seedInput: input, taalId, rangeStart, rangeEnd,
+      });
+      if (generated.error) { _showExEditError(generated.error); return; }
+    } else {
+      parsed = parseCompactPattern(input, taalId);
+      if (parsed.error) { _showExEditError(parsed.error); return; }
+      generated = generateFromCompactPattern({ parsed, rangeStart, rangeEnd });
+    }
 
-      const rangeStart = parseInt(document.getElementById('ex-edit-start-note')?.value || '4', 10);
-      const rangeEnd = parseInt(document.getElementById('ex-edit-end-note')?.value || '11', 10);
+    if (errorEl) errorEl.style.display = 'none';
 
-      const generated = generateFromCompactPattern({ parsed, rangeStart, rangeEnd });
-      _exEditGenerated = { parsed, generated, rangeStart, rangeEnd };
+    _exEditGenerated = { parsed, generated, taalId, rangeStart, rangeEnd, extensionMode: mode };
 
-      // Render preview
-      const previewContainer = document.getElementById('ex-edit-preview-container');
-      if (previewContainer) previewContainer.style.display = '';
-      _renderExercisePreview(taalId, generated, 'ex-edit-');
-    });
+    // Regeneration resets any manual-edit state on the preview.
+    _resetExerciseEditorState('edit');
+
+    const previewContainer = document.getElementById('ex-edit-preview-container');
+    if (previewContainer) previewContainer.style.display = '';
+    _renderExerciseEditor('edit');
   }
+
+  function _showExEditError(msg) {
+    const errorEl = document.getElementById('ex-edit-pattern-error');
+    if (errorEl) {
+      errorEl.textContent = msg;
+      errorEl.style.display = '';
+    }
+  }
+
+  const btnEditRegenFirstPlus1 = document.getElementById('btn-edit-regenerate-first-plus-1');
+  if (btnEditRegenFirstPlus1) btnEditRegenFirstPlus1.addEventListener('click', () => _regenerateEditExercise('first-plus-1'));
+  const btnEditRegenLastPlus1 = document.getElementById('btn-edit-regenerate-last-plus-1');
+  if (btnEditRegenLastPlus1) btnEditRegenLastPlus1.addEventListener('click', () => _regenerateEditExercise('last-plus-1'));
 
   // Save button on edit page (update existing)
   const btnEditSave = document.getElementById('btn-edit-save');
@@ -4159,9 +4913,20 @@ export function initUI(settings) {
       const idx = exercises.findIndex(e => e.id === _exEditPageExercise.id);
 
       if (_exEditGenerated) {
-        // Regenerated — save new data
-        const { parsed, generated, rangeStart, rangeEnd } = _exEditGenerated;
-        const laykari = _detectLaykari(parsed.beatStructure);
+        // Regenerated or manually edited — save current data.
+        const { parsed, generated, rangeStart, rangeEnd, extensionMode } = _exEditGenerated;
+        const effectiveBeatStructure =
+          generated.beatStructure
+          || (parsed && parsed.beatStructure)
+          || _exEditPageExercise.beatStructure;
+        const laykari = effectiveBeatStructure
+          ? _detectLaykari(effectiveBeatStructure)
+          : (_exEditPageExercise.laykari || 'ekgun');
+        // For manual edits without a regeneration, `parsed` is null — keep
+        // the existing compactNotation so the seed shown to the user stays intact.
+        const compactNotation = (extensionMode === 'last-plus-1')
+          ? (generated.compactNotation ?? _exEditPageExercise.compactNotation ?? '')
+          : (parsed ? compactPatternToString(parsed.vibhags) : (_exEditPageExercise.compactNotation || ''));
 
         const updated = {
           ..._exEditPageExercise,
@@ -4170,10 +4935,12 @@ export function initUI(settings) {
           rangeEnd,
           laykari,
           patternType: 'compact',
-          compactNotation: compactPatternToString(parsed.vibhags),
-          beatStructure: parsed.beatStructure,
+          extensionMode: extensionMode || 'first-plus-1',
+          compactNotation,
+          beatStructure: effectiveBeatStructure,
           arohaCycles: generated.arohaCycles,
           avarohaCycles: generated.avarohaCycles,
+          manuallyEdited: _exerciseEditors.edit.manuallyEdited || _exEditPageExercise.manuallyEdited || false,
         };
 
         if (idx >= 0) exercises[idx] = updated;
@@ -4209,8 +4976,17 @@ export function initUI(settings) {
 
       let newExercise;
       if (_exEditGenerated) {
-        const { parsed, generated, rangeStart, rangeEnd } = _exEditGenerated;
-        const laykari = _detectLaykari(parsed.beatStructure);
+        const { parsed, generated, rangeStart, rangeEnd, extensionMode } = _exEditGenerated;
+        const effectiveBeatStructure =
+          generated.beatStructure
+          || (parsed && parsed.beatStructure)
+          || _exEditPageExercise.beatStructure;
+        const laykari = effectiveBeatStructure
+          ? _detectLaykari(effectiveBeatStructure)
+          : (_exEditPageExercise.laykari || 'ekgun');
+        const compactNotation = (extensionMode === 'last-plus-1')
+          ? (generated.compactNotation ?? _exEditPageExercise.compactNotation ?? '')
+          : (parsed ? compactPatternToString(parsed.vibhags) : (_exEditPageExercise.compactNotation || ''));
         newExercise = {
           ..._exEditPageExercise,
           id: newId,
@@ -4219,10 +4995,12 @@ export function initUI(settings) {
           rangeEnd,
           laykari,
           patternType: 'compact',
-          compactNotation: compactPatternToString(parsed.vibhags),
-          beatStructure: parsed.beatStructure,
+          extensionMode: extensionMode || _exEditPageExercise.extensionMode || 'first-plus-1',
+          compactNotation,
+          beatStructure: effectiveBeatStructure,
           arohaCycles: generated.arohaCycles,
           avarohaCycles: generated.avarohaCycles,
+          manuallyEdited: _exerciseEditors.edit.manuallyEdited || _exEditPageExercise.manuallyEdited || false,
           createdAt: new Date().toISOString(),
         };
       } else {
@@ -4506,9 +5284,13 @@ export function initUI(settings) {
           bolsForMatra.forEach((subBol, i) => {
             _playTablaBol(subBol, scheduledTime + i * subDuration, velocity, subDuration);
           });
+          _playAccentsForMatra(matraIndex, scheduledTime, velocity, _exLoadedExercise.taalId);
 
           // Highlight current beat
           _highlightBeat(matraIndex);
+
+          // Advance the main-page exercise strip in lockstep with the beat.
+          _advanceExerciseStrip(matraIndex);
 
           // Play swaras (Demo mode, or Practice mode when not user's turn)
           const shouldPlaySwaras = _exMode === 'demo' || (_exMode === 'practice' && !_exIsUserTurn);
@@ -4587,6 +5369,9 @@ export function initUI(settings) {
 
         exerciseTaalEngine.start(audioEngine.audioCtx);
         _exPlaying = true;
+        // Switch the main-page strip to exercise mode (swaras become visible).
+        _stripMode = 'exercise';
+        _syncExerciseStrip();
         practiceTracker.startExercise(_exLoadedExercise?.id);
         backgroundAudio.activate('exercise');
         backgroundAudio.setTitle(_exLoadedExercise?.name
@@ -4648,6 +5433,10 @@ export function initUI(settings) {
       _highlightBeat(-1);
       _renderPlayerCycle();
       _updateExProgress();
+
+      // Reset the main-page exercise strip too so it matches the pre-Start
+      // preview.
+      _resetExerciseStrip();
 
       const yourTurn = document.getElementById('ex-your-turn');
       if (yourTurn) yourTurn.style.display = 'none';
@@ -4950,23 +5739,11 @@ function _initProfilePage() {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Helper: updateAlankaarDisplay
-// ---------------------------------------------------------------------------
-
-/**
- * Update the alankaar notation display based on the current settings.
- * For 'scale', shows the full ascending + descending scale in the current thaat.
- * For patterns, shows the pattern name (full generation in Phase 4).
- *
- * @param {Object} settings - Current settings with thaat, currentAlankaar
- * @param {HTMLElement|null} el - The DOM element to update
- */
+/** Update the alankaar display. 'scale' shows full aroha+avaroha; else the label. */
 function updateAlankaarDisplay(settings, el) {
   if (!el) return;
 
   if (settings.currentAlankaar === 'scale') {
-    // Show full scale aroha + avaroha for the current thaat
     const thaat = settings.thaat || 'bilawal';
     const positions = [4, 5, 6, 7, 8, 9, 10, 11]; // S R G m P D N S'
     const aroha = positions.map(p => getPositionLabel(p, thaat, 'english'));
@@ -4977,22 +5754,7 @@ function updateAlankaarDisplay(settings, el) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Private: _bindAdvancedSlider
-// ---------------------------------------------------------------------------
-
-/**
- * Generic helper to bind a range slider to a settings property, a display
- * element, and auto-persist on change.
- *
- * @param {string} sliderId   - The DOM id of the <input type="range">.
- * @param {string} displayId  - The DOM id of the value display element.
- * @param {string} settingsKey - The key in the settings object to update.
- * @param {function} parse     - Converts the slider's string value to the
- *                               appropriate type (e.g. parseInt, parseFloat).
- * @param {function} format    - Converts the parsed value to a display string.
- * @private
- */
+/** Bind a range slider to settings[key] with display formatting and auto-persist. */
 function _bindAdvancedSlider(sliderId, displayId, settingsKey, parse, format) {
   const slider  = document.getElementById(sliderId);
   const display = document.getElementById(displayId);

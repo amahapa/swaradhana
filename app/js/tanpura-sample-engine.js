@@ -2,30 +2,38 @@
  * @fileoverview Sample-based tanpura engine (tanpura_1).
  *
  * Plays pre-recorded tanpura drone MP3s (sourced from Rāga Junglism; see
- * assets/audio/tanpura/tanpura_1/CREDITS.md) with real-time jivari DSP
- * layered on top of the dry signal. Implements the shared engine interface
- * consumed by js/tanpura.js (the controller):
+ * `assets/audio/tanpura/tanpura_1/CREDITS.md`) with a real-time jivari
+ * DSP chain layered on top of the dry signal. Implements the shared
+ * tanpura engine interface consumed by the controller (`js/tanpura.js`):
  *
- *   - static id          : 'sample'
- *   - static label       : 'Recorded (tanpura_1)'
- *   - static capabilities: { patterns: ['pa', 'ma'] }
+ * ```
+ *   static id, static label, static capabilities
  *
- *   - isPlaying: boolean
- *   - start(saFreq, fineTuningCents): Promise<void>
- *   - stop(): void
- *   - updateConfig(partial): void
- *   - setJivari(percent): void
- *   - setOutputGain(value, rampSeconds=0): void
+ *   isPlaying: boolean
+ *   start(saFreq, fineTuningCents):  Promise<void>
+ *   stop():                          void
+ *   updateConfig(partial):           void
+ *   setJivari(percent):              void
+ *   setDetuneCents(cents):           void
+ *   setDestination(audioNode):       void   // controller picks routing
+ *   setOutputGain(value, rampSec=0): void   // crossfade helper
+ * ```
  *
- * Signal graph:
+ * Signal graph inside the engine:
  *
- *   BufferSource ──┬── dryGain ─────────────────────────────────────┐
- *                  │                                                ├─► outputGain ─► audioEngine.tanpuraGainA
- *                  └── bandpassBank ─► combDelay ─► waveshaper ─► wetGain ┘
+ * ```
+ *   BufferSource ──┬── dryGain ──────────────────────────────────┐
+ *                  │                                             ├─► outputGain ─► destination
+ *                  └── [3-band BiquadBP] ─► combDelay ─► shaper ─► wetGain ┘
+ * ```
  *
- * The `wetGain` is driven by the jivari slider (0..100 → 0..wetScale).
- * Bandpass filters are retuned on every key change to track the harmonics
- * of Sa.
+ * `destination` is set by the controller via {@link setDestination}:
+ *   - single mode:   `audioEngine.masterGain` (bypasses the A/B bus)
+ *   - concert mode:  `audioEngine.tanpuraGainA` or `tanpuraGainB`
+ *
+ * Jivari slider drives `wetGain` (0..0.55), bandpass Q, and comb feedback
+ * together. Bandpass filters are retuned on every key change to track
+ * harmonics 2×, 3×, 5× of the current Sa.
  *
  * @module tanpura-sample-engine
  */
@@ -81,9 +89,10 @@ export class SampleTanpuraEngine {
 
     static ASSET_PREFIX = 'assets/audio/tanpura/tanpura_1';
 
-    constructor(busId = 'A') {
-        this._busId = (busId === 'B') ? 'B' : 'A';
+    constructor() {
         this.isPlaying = false;
+        /** @type {AudioNode|null} set by controller via setDestination. */
+        this._destination = null;
         this.config = {
             pattern: PRACTICE_DEFAULTS.tanpuraPattern,
             // octave / speed / variance / string2Note are ignored by this
@@ -214,6 +223,23 @@ export class SampleTanpuraEngine {
         }
     }
 
+    /**
+     * Point this engine at a destination node. Called by the controller
+     * before {@link start}, and whenever concert-mode toggles re-route us
+     * between `masterGain` and `tanpuraGainA/B`. Safe to call while
+     * playing — the outputGain is rewired without stopping the source.
+     *
+     * @param {AudioNode} node
+     */
+    setDestination(node) {
+        if (!node) return;
+        this._destination = node;
+        if (this._outputGain) {
+            try { this._outputGain.disconnect(); } catch (_) {}
+            this._outputGain.connect(node);
+        }
+    }
+
     // ------------------------------------------------------------------
     // Internals — graph construction
     // ------------------------------------------------------------------
@@ -224,8 +250,10 @@ export class SampleTanpuraEngine {
         const ctx = audioEngine.audioCtx;
         this._outputGain = ctx.createGain();
         this._outputGain.gain.value = 1.0;
-        const busNode = this._busId === 'B' ? 'tanpuraB' : 'tanpuraA';
-        this._outputGain.connect(audioEngine.getInputNode(busNode));
+        // Controller sets _destination before start(); fall back to
+        // masterGain if not, so we still produce sound.
+        const dest = this._destination || audioEngine.masterGain;
+        this._outputGain.connect(dest);
 
         this._dryGain = ctx.createGain();
         this._dryGain.gain.value = 1.0;
