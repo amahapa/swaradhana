@@ -8,38 +8,36 @@
  *
  * ## Signal chain
  *
+ * All continuous sources flow through DryMix → MasterGain → destination.
+ * The Convolver (reverb) stays alive but is only activated by the on-demand
+ * tabla reverb send — no source is wired through it by default.
+ *
  * ```
- *                                 ┌── Compressor → Reverb ─┐
- * Swar synth ──── SwarGain ──────┤                        │
- * Manjira    ──── ManjiraGain  ──┤                        │
- * Ghungroo   ──── GhungrooGain ──┘                        │
- *                                                         ├──► MasterGain ──► destination
- * Tabla      ──── BassEQ → TrebleEQ → TablaGain → DryMix ─┤
- * Kartaal    ──── KartaalGain ───────────────────► DryMix ─┤
- *                                                         │
- * Tanpura (single mode)  ────────────────────────────────► │   (bypasses compressor + reverb + A/B bus;
- *                                                         │    per-engine outputGain connects directly
- *                                                         │    to MasterGain for lowest mobile CPU load)
- *                                                         │
- * Tanpura A  ── tanpuraGainA → panA ─┐                    │
- * Tanpura B  ── tanpuraGainB → panB ─┴── tanpuraBusGain ──┘   (concert mode only — two engines +
- *                                                              equal-power balance + wide pan)
+ * Swar synth ──── SwarGain ─────┐
+ * Manjira     ──── ManjiraGain ─┤
+ * Ghungroo    ──── GhungrooGain ┤
+ * Kartaal     ──── KartaalGain ─┤
+ * Tabla       ──── BassEQ → TrebleEQ → TablaGain ┤
+ *                                                 ├─► DryMix ─┐
+ *                            [optional wet send] ─► Reverb ───┤
+ *                                                             ├─► MasterGain ──► destination
+ * Tanpura (single mode)  ──── engine.outputGain  ─────────────┤
+ * Tanpura A  ── tanpuraGainA → panA ─┐                        │
+ * Tanpura B  ── tanpuraGainB → panB ─┴── tanpuraBusGain ──────┘
+ *                                        (concert mode only)
  * ```
  *
  * ## Tanpura routing rules
  *
- * The tanpura bypasses the compressor + reverb on the master chain. The
- * drone is self-sustaining with controlled amplitude — neither node adds
- * much musically — and convolution reverb is the most expensive continuous
- * node in the graph on mobile CPUs. Keeping the tanpura path short is the
- * main win for battery-friendly mobile playback.
+ * The tanpura bypasses every shared stage between the engine and masterGain
+ * to keep its sustain path as short as possible on mobile.
  *
- * In **single mode** (concert off) the active tanpura engine's outputGain
- * connects **directly to masterGain** — no A/B panning, no balance stage.
+ * In **single mode** the active engine's outputGain connects directly to
+ * masterGain — no A/B panning, no balance stage.
  *
  * In **concert mode** two engine instances play simultaneously and connect
- * to `tanpuraGainA` / `tanpuraGainB` respectively. Those buses go through
- * pan (±0.7), merge at `tanpuraBusGain`, and then hit masterGain.
+ * to `tanpuraGainA` / `tanpuraGainB`. Those buses go through pan (±0.7),
+ * merge at `tanpuraBusGain`, and then hit masterGain.
  *
  * @module audio-engine
  */
@@ -164,13 +162,11 @@ class AudioEngine {
         this.compressor.attack.value = 0.003;
         this.compressor.release.value = 0.25;
 
-        // Reverb — convolution with a synthetic room IR. 1-second tail
-        // keeps convolution cost reasonable on mobile.
+        // Reverb — convolution with a synthetic room IR. Only connected
+        // on-demand by the tabla reverb send; swar/aux paths stay dry so the
+        // convolver doesn't run continuously on mobile.
         this.reverb = this.audioCtx.createConvolver();
         this.reverb.buffer = this._generateReverbIR(1, 3);
-
-        // Wet path: compressor → reverb → master
-        this.compressor.connect(this.reverb);
         this.reverb.connect(this.masterGain);
 
         // Dry bus (tabla + kartaal bypass reverb).
@@ -209,9 +205,14 @@ class AudioEngine {
     }
 
     _buildSwarBus() {
+        // Direct to dryMix — skipping compressor + convolver frees the two
+        // most expensive continuous nodes on Android. Per-note WebAudioFont
+        // voices already have their own envelope/gain control, and the
+        // master chain has enough headroom upstream that no brick-wall is
+        // needed.
         this.swarGain = this.audioCtx.createGain();
         this.swarGain.gain.value = 0.7;
-        this.swarGain.connect(this.compressor);
+        this.swarGain.connect(this.dryMix);
     }
 
     _buildTablaBuses() {
@@ -235,13 +236,16 @@ class AudioEngine {
     }
 
     _buildAuxiliaryBuses() {
+        // All aux percussion runs through dryMix. Previously manjira/ghungroo
+        // routed into the convolver, but short percussive hits don't benefit
+        // enough from reverb to justify the continuous DSP cost on mobile.
         this.manjiraGain = this.audioCtx.createGain();
         this.manjiraGain.gain.value = 0.5;
-        this.manjiraGain.connect(this.reverb);
+        this.manjiraGain.connect(this.dryMix);
 
         this.ghungrooGain = this.audioCtx.createGain();
         this.ghungrooGain.gain.value = 0.4;
-        this.ghungrooGain.connect(this.reverb);
+        this.ghungrooGain.connect(this.dryMix);
 
         this.kartaalGain = this.audioCtx.createGain();
         this.kartaalGain.gain.value = 0.5;
