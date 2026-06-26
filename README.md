@@ -4,29 +4,14 @@
 
 **Author:** Arun Mahapatro · **License:** MIT (see `LICENSE`)
 
-This README is a **build-spec index**. It is the top-level entry point for
-rebuilding the entire app from the `docs/` folder. If you are an LLM
-regenerating the codebase, read this file first to learn the layout and which
-doc to consult for which module, then follow the rebuild order at the bottom.
+Swaradhana is a browser-based Hindustani classical music practice companion: a
+programmable **tanpura** drone, a **tabla** engine with 10 taals, a melodic
+**swar** synth, an **exercise (alankaar)** generator, and a practice tracker
+with streaks and targets. It is built for bansuri players but works for any
+Hindustani practice — vocal, sitar, sarod, harmonium, and more.
 
----
-
-## What Swaradhana is
-
-Swaradhana is a browser-based Hindustani Classical Music practice app for
-bansuri (bamboo flute) players, and more generally for anyone who needs a
-programmable tanpura + tabla + swar companion for Hindustani practice (vocal,
-sitar, sarod, etc.). It bundles a tanpura drone (synth or sampled), a tabla
-engine with 10 built-in taals, a swar synth driven by WebAudioFont, an
-exercise/alankaar pattern generator, a practice tracker with streaks, and a
-profile page with daily/weekly/monthly analytics.
-
-It runs as a static web app — no build step, no bundler, no package manager.
-Open `app/index.html` over any HTTP server and it works. On Android it
-installs as a PWA (manifest declares standalone, portrait, dark theme) and
-keeps audio running with the screen off via a silent-loop + MediaSession +
-Wake Lock combo. Target user is an individual practitioner who wants an
-offline-capable, configurable practice companion.
+This README is a **user guide** — how to operate the app. (For the
+architecture and rebuild specs, see the `docs/` folder.)
 
 ---
 
@@ -40,274 +25,195 @@ python3 -m http.server 8000
 # open http://localhost:8000
 ```
 
-Any static file server works. There is no build step and no `package.json`.
-For development, use a no-cache server to avoid ES-module caching pain:
+Any static file server works — there is no build step and no install.
 
-```python
-class H(SimpleHTTPRequestHandler):
-    def end_headers(self):
-        self.send_header('Cache-Control', 'no-store')
-        super().end_headers()
-```
+### Install on your phone (PWA)
 
-### Install as a PWA on Android
+1. Host the `app/` folder on any HTTPS static host (GitHub Pages, Netlify,
+   Cloudflare Pages), or open the local URL above on the same network.
+2. **Android (Chrome):** menu (⋮) → **Install app** / *Add to Home screen*.
+3. **iOS (Safari):** Share → **Add to Home Screen**.
+4. Launches full-screen, portrait, dark theme.
+5. **The first tap anywhere unlocks audio** (browser autoplay policy) — tap
+   once before expecting sound.
 
-1. Push `app/` to any HTTPS static host (GitHub Pages, Netlify Drop,
-   Cloudflare Pages).
-2. Open the URL in Chrome on Android.
-3. Menu → **Install app** (or **Add to Home screen**). Launches full-screen,
-   portrait, dark theme — driven by `manifest.json`.
-4. First tap inside the app unlocks the `AudioContext` (browser autoplay
-   policy — `app.js` listens for the first `click` / `touchstart` and calls
-   `audioEngine.init()` + `audioEngine.resume()`).
-
-For a real `.apk`, feed the hosted URL into [pwabuilder.com](https://www.pwabuilder.com/)
-or use Google's `bubblewrap` CLI (Trusted Web Activity).
-
-### Browser requirements
-
-- Modern Chrome / Safari / Firefox.
-- Web Audio API (`AudioContext`, `ConvolverNode`, `BiquadFilterNode`,
-  `StereoPanner`, `PeriodicWave`, `WaveShaperNode`).
-- ES modules (native `<script type="module">`).
-- `localStorage`, optional Wake Lock API (mobile).
-
-A service worker for full offline support is **planned but not built** — the
-app needs internet on first load until then.
+**Background playback:** when installed as a PWA, audio keeps playing with the
+screen off (Android is the most reliable; iOS is best-effort). Use this for
+long tanpura/tabla practice sessions.
 
 ---
 
-## Repository layout
+## The main screen
 
-```
-Swaradhana/
-├── README.md                  this file (build-spec index)
-├── LICENSE                    MIT
-├── app/                       deployable web app (no build step)
-│   ├── index.html             single-page UI; all screens are .full-page overlays
-│   ├── manifest.json          PWA manifest (standalone, portrait, dark)
-│   ├── css/
-│   │   ├── styles.css           theme, CSS variables, layout, full-page overlays (~1387 lines)
-│   │   └── components.css       buttons, sliders, modals, beat grid, taal/exercise tables (~1276 lines)
-│   ├── js/
-│   │   ├── app.js                          entry point: load settings, initUI, gesture-gated AudioContext init, practice-tracker lifecycle
-│   │   ├── config.js                       constants — PRACTICE_DEFAULTS, STORAGE_KEYS, SWAR_RATIOS, KEY_FREQUENCIES, THAAT_DEFINITIONS, TAAL_DEFINITIONS, LAYKARI_MULTIPLIERS, LAYA_RANGES, PITCH_TOLERANCE, VELOCITY_SCALING, PROFILE_DEFAULTS
-│   │   ├── storage.js                      localStorage wrapper — save/load/remove/exportAllData/importAllData/clearAllData
-│   │   ├── music-engine.js                 frequency + thaat math — getEffectiveSaFreq, getSwarFreq, getPositionFreq, getPositionSwara, getPositionLabel, classifyLaya, getTanpuraVoicing
-│   │   ├── audio-engine.js                 Web Audio singleton — AudioContext (latencyHint:'playback'), masterGain, dryMix, reverb, compressor (orphaned), tanpura/swar/tabla/aux buses
-│   │   ├── taal-engine.js                  beat scheduler — 200ms lookahead, 50ms pump, sam/tali/khali/filler classification, deferred tempo/taal at cycle boundary
-│   │   ├── tabla.js                        electronic tabla synth — BOL_PARAMS for 13 bols (osc + noise envelopes)
-│   │   ├── tabla-samples.js                sample-based tabla — REFERENCE_FREQ_BY_SET, GAIN_BY_SET, dayan pitch-shift via playbackRate, bayan exemption {Ga, Ge, Ghe, Ka, Kat, Ke}
-│   │   ├── tanpura.js                      TanpuraController — pluggable engine facade, single vs concert mode, A/B engine instances, capability gating
-│   │   ├── tanpura-electronic-engine.js    PeriodicWave additive synth — jivari = 2/4/16/32 harmonics, patterns ['pa','ma','ni']
-│   │   ├── tanpura-sample-engine.js        MP3 playback + jivari DSP (5-band bandpass + comb delay + soft-clip), patterns ['pa','ma'], loopStart=1.5s, loopEnd=dur-3s
-│   │   ├── swar-synth.js                   WebAudioFont melodic synth — 4 presets (harmonium/strings/guitar/piano), multi-voice 1/sqrt(N) scaling, custom instrument upload
-│   │   ├── accents.js                      AccentPlayer — manjira_1/2, ghungroo_1, tali_1; routes through tablaGain (no new graph topology)
-│   │   ├── alankaar-engine.js              pattern grammar — parsePattern, parseCompactPattern, generateFromCompactPattern, fitToTaal, bracket [..] mixed laykari, sustain `_`, rest `.`
-│   │   ├── practice-session.js             session orchestrator — configure/start/pause/resume/stop, demo/practice/test modes, scheduledTime, onBeat/onCycleChange
-│   │   ├── practice-tracker.js             activity logger — 30s heartbeat, 5-min idle cutoff, daily→weekly→monthly rollup, streak, JSON/CSV export
-│   │   ├── profile.js                      name/avatar/createdAt, baseline targets, weeklyTargetOverrides, target resolution priority
-│   │   ├── background-audio.js             mobile keep-alive — silent 30s WAV loop + MediaSession + Wake Lock, ref-counted activate/deactivate
-│   │   └── ui-controller.js                all UI bindings — page navigation, settings grid, BPM panel, transport, taal CRUD, exercise CRUD, exercise player (~4000 lines)
-│   ├── assets/
-│   │   ├── audio/
-│   │   │   ├── tabla/tabla_e_1/             16 MP3 bols, ref Sa = E3 (164.81 Hz)
-│   │   │   ├── tabla/tabla_c_1/             16 MP3 bols, ref Sa = C4 (261.63 Hz, Naad/MIT)
-│   │   │   └── tanpura/tanpura_1/           24 MP3 drones (Pa-Sa & Ma-Sa × 12 keys)
-│   │   ├── exercises/                       seed exercise JSONs (optional)
-│   │   └── icons/                           PWA + in-app icons
-│   └── webaudiofont/
-│       ├── WebAudioFontPlayer.js                ~124 KB
-│       ├── 0210_FluidR3_GM_sf2_file.js          Harmonium (Accordion, GM 21), ~297 KB
-│       ├── 0480_Chaos_sf2_file.js               Strings ensemble (GM 48), ~141 KB
-│       ├── 0240_Aspirin_sf2_file.js             Acoustic Guitar (GM 25), ~206 KB
-│       └── 0000_FluidR3_GM_sf2_file.js          Concert Piano (GM 1), ~1.2 MB
-└── docs/                      authoritative specifications (rebuild source of truth)
-```
+The main screen has a settings grid of tiles plus a transport row:
+
+- **Key** (top-left) — your Sa. Tap to pick from 12 pitches and fine-tune in cents.
+- **Saptak** — octave: Mandra (lower), Madhya (middle), Taar (upper).
+- **Tempo** — BPM. Tap to open the tempo page; the small ▶ on the tile toggles tabla.
+- **Thaat** — scale type (Bilawal, Kalyan, Khamaj, Bhairav, Bhairavi, Kafi, Asavari, Todi, Purvi, Marwa). Determines the swaras your note positions map to.
+- **Taal** — rhythm cycle. The `‹ D ›` switcher cycles taal variations (see below).
+- **Tanpura** — drone tuning. The small ▶ on the tile toggles the drone.
+- **Transport row** — *Completed* (today's minutes) · *Target* (daily goal) · **Start / Pause / Stop**.
+- **Exercise bar** — tap **Exercise** (left) to open the library; tap the exercise name (right) to open the player.
+
+### Free practice (tanpura + tabla, no exercise)
+
+1. Set **Key**, **Saptak**, **Thaat**, and **Tempo**.
+2. Turn on **Tanpura** and/or **Tabla** (tile ▶ buttons), or just press **Start**.
+3. **Start** plays the tabla theka at the current taal with the tanpura drone.
+4. **Pause** freezes audio (the beat pointer holds); **Stop** ends and resets.
+   After a pause, **Start** reads **Resume**.
 
 ---
 
-## Documentation map (the rebuild index)
+## Setting up the sound
 
-The docs in `docs/` are the source of truth. To rebuild a module, find its
-row in the table below and read the listed doc(s).
+### Tanpura (Settings → Customize Tanpura)
 
-| Doc | Covers | Source files to rebuild |
+- **Sound source** — *Electronic* (additive synth, all patterns) or a sampled set (recorded, with jīvārī DSP).
+- **Pattern (first string)** — **Pa-Sa** or **Ma-Sa** (Ni where supported).
+- **Speed** — drone cycle speed.
+- **Concert mode** — off = single tanpura; on = dual A/B tanpuras (B panned right, slightly detuned), with a **Balance (L↔R)** slider.
+- **Jivari A / B** — brightness of the buzzing overtone.
+- **Reverb / Variance** — room ambience and subtle timing humanization.
+- **Play / Stop** auditions the current configuration.
+
+### Tabla (Settings → Customize Tabla)
+
+- **Sound source** — *Electronic (synthesized)* or a real sampled set (e.g. Key of E, or Key of C from Naad).
+- **Balance (Dayan ↔ Bayan)**, **Timber** (mellow↔bright), **Bass EQ**, **Reverb**.
+- Sampled dāyāñ pitch-shifts to your key automatically; bāyāñ stays at recorded pitch.
+- Set per-instrument **volume / EQ** under the master volume (🔊) page.
+
+### Swar voice (Settings → Customize Swara)
+
+- Pick one or more voices — **Harmonium, Strings, Guitar, Piano**, or **Vocal (Sargam)** (recorded human sargam). Selected voices layer together, each with its own volume.
+- **Add a custom instrument** by pasting a WebAudioFont preset `.js` URL (from the WebAudioFont catalog) and naming it.
+
+---
+
+## Programming exercises (alankaars)
+
+Exercises are melodic patterns that the app expands into a full ascent (āroha)
+and descent (avaroha) across your chosen range, aligned to a taal.
+
+### Create one
+
+1. Main screen → **Exercise** → **+ New Exercise** to open the designer.
+2. Set:
+   - **Taal** — the rhythmic cycle (defaults to your current taal).
+   - **Level** — Beginner / Intermediate / Advanced.
+   - **Start Note** and **End Note** — flute positions **1–15** (4 = Sa, 8 = Pa, 11 = high Sa). The pattern tiles upward until it reaches the End Note ceiling.
+3. Type a **pattern** (the compact seed — see below).
+4. Tap a generator to expand it:
+   - **First + 1** — each repeat shifts the seed's *first* note up by one (smooth, overlapping climb).
+   - **Last + 1** — each repeat starts one above the *last* note (separated, blocky phrases).
+   - The **avaroha (descent)** is generated automatically as a mirror of the āroha, keeping the same rhythm.
+5. Review the **Āroha** and **Avaroha** preview tables. Tap any matra cell to tweak it by hand (chips + position palette; up to 4 notes per matra). A *Manually edited* badge warns that regenerating discards hand edits.
+6. **Save** (updates the current exercise) or **Save As New** (fresh copy). It's auto-named like `teentaal_b1`, but you can rename it.
+
+To build entirely by hand, skip the generators and use **+ Add blank cycle**,
+then tap cells to fill them.
+
+### Compact pattern notation
+
+The pattern is a short seed of digits and symbols. Digits are **relative note
+positions** within your range (1 = lowest played, ascending from there).
+
+| Symbol | Meaning | Example |
 |---|---|---|
-| [`docs/instruction.md`](docs/instruction.md) | Tech stack, master architecture, settings schema, phase roadmap | All — read first for the big picture |
-| [`docs/features.md`](docs/features.md) | User-facing features F1–F28+, build-status flags, flows | `js/ui-controller.js` behaviour, mode buttons, transport, exercise player |
-| [`docs/ui_design.md`](docs/ui_design.md) | HTML structure, CSS variables, color palette, typography, page inventory | `app/index.html`, `app/css/styles.css`, `app/css/components.css` |
-| [`docs/audio_engine.md`](docs/audio_engine.md) | Web Audio graph, master chain, tanpura/swar/tabla/aux buses, routing rules | `app/js/audio-engine.js` |
-| [`docs/tanpura.md`](docs/tanpura.md) | Pluggable engine architecture, concert mode, jivari DSP, sample loop trim, A/B buses | `app/js/tanpura.js`, `app/js/tanpura-electronic-engine.js`, `app/js/tanpura-sample-engine.js` |
-| [`docs/tabla_and_taals.md`](docs/tabla_and_taals.md) | Bols, taal cycle/vibhag, theka, sam/tali/khali, sample-player ref-freq, taal variation editor | `app/js/tabla.js`, `app/js/tabla-samples.js`, `app/js/taal-engine.js`, `THAAT_DEFINITIONS`/`TAAL_DEFINITIONS` in `config.js` |
-| [`docs/alankaars.md`](docs/alankaars.md) | Pattern catalog, compact-pattern grammar, generator, taal-fitting, range clamp | `app/js/alankaar-engine.js` |
-| [`docs/thaats_and_raags.md`](docs/thaats_and_raags.md) | 10 thaats with position-to-swara alteration maps; raag system spec (not yet built) | `THAAT_DEFINITIONS` in `app/js/config.js`, `app/js/music-engine.js` |
-| [`docs/frequency_mapping.md`](docs/frequency_mapping.md) | Just-intonation `SWAR_RATIOS`, `KEY_FREQUENCIES`, saptak multipliers | `KEY_FREQUENCIES`, `SWAR_RATIOS`, `SAPTAK` in `app/js/config.js` |
-| [`docs/written_music.md`](docs/written_music.md) | Notation rules — flute positions 1–15, swara labels, ornaments, laykari, Hindi/English | `app/js/music-engine.js` (`getPositionLabel`, `getPositionSwara`), `config.js` notation tables |
-| [`docs/practice_curriculum.md`](docs/practice_curriculum.md) | Session structure, demo/practice/test mode semantics | `app/js/practice-session.js`, `app/js/practice-tracker.js` |
+| `1`–`9` | a note position | `1234` → four ascending notes |
+| `.` | rest (silence on this beat) | `1.3` → note, rest, note |
+| `_` | sustain (hold the previous note) | `12_3` → 1, 2 (held), 3 |
+| `[…]` | 2–4 notes packed into one beat (mixed laykari) | `[12]34` → two notes on beat 1, then one each |
+| space | visual grouping of vibhags (optional) | `1234 2345 3456` |
 
-> A capable code-gen LLM should be able to use this table alone to decide
-> which doc to load when rebuilding a given file.
+Examples to copy:
 
----
+```
+1234                         simple ascending scale (one note per beat)
+12_3 23_4 34_5 45_6          each beat: two notes, second sustained
+1234 2345 [34][45][56] 5678  dugun (two notes/beat) on the third group
+1.3 .2.3 1234 5678           rests woven in
+```
 
-## Key data shapes (brief)
+Rules: a pattern can't start with `_` (nothing to sustain yet); brackets hold
+2–4 notes; only digits, `.`, `_`, `[]`, and spaces are allowed.
 
-Full schemas live in `docs/instruction.md § Settings Schema` and the
-specific feature docs. Quick summary:
+### Practice modes (Exercise Player)
 
-- **`settings`** (`STORAGE_KEYS.SETTINGS`, defaults from
-  `PRACTICE_DEFAULTS` in `config.js`) — `key`, `tempo`, `saptak`, `thaat`,
-  `taal`, `taalVariation`, `laykari`, `notation`; tanpura
-  (`tanpuraEngine`, `tanpuraPattern`, `tanpuraSpeed`, `tanpuraConcertMode`,
-  `tanpuraJivariA/B`, `tanpuraBalance`, `tanpuraVolumeOverall`); tabla
-  (`tablaSource`, `tablaVolume`, `tablaBassEQ`, `tablaTrebleEQ`,
-  `tablaBalance`, `tablaTimber`, `tablaReverb`); swar (`swarVolume`,
-  `swarVoice`, `swarVoiceVolumes`); `currentExerciseId`. See
-  `audio_engine.md` and `tanpura.md` for the meaning of each field.
-- **`exercise`** (`STORAGE_KEYS.EXERCISES`) — `id` (`<taalId>_<b|i|a><n>`),
-  `name`, `taalId`, `rangeStart`/`rangeEnd` (1–15), `laykari`,
-  `competency`, `patternType` (`compact` | `legacy`), `compactNotation`,
-  `beatStructure`, generated `arohaCycles`/`avarohaCycles`. See
-  `alankaars.md` for the grammar and generator.
-- **`taal variation`** (`STORAGE_KEYS.TAAL_VARIATIONS`) — `id`, `taalId`,
-  `name`, per-matra `bols[]` (max 4 per matra), per-matra `accents[]`. See
-  `tabla_and_taals.md`.
-- **`profile`** (`STORAGE_KEYS.PROFILE`) — `name`, `avatar`, `createdAt`,
-  baseline `targets` (`dailyMinutes`, `weeklyHours`),
-  `weeklyTargetOverrides` keyed by ISO week. See `practice_curriculum.md`.
-- **`activity`** (`STORAGE_KEYS.ACTIVITY`) — rolling log: `daily` (last
-  30 days), `weekly` (last 26 weeks), `monthly` (forever), `streak`
-  (`current`, `longest`, `lastActiveDate`). Both `appSec` (5-min idle
-  cutoff) and `exerciseSec` are tracked separately. See
-  `practice_curriculum.md`.
+Open the player by tapping the exercise name, then pick a mode:
+
+- **Demo** — the app plays tanpura + tabla + the melody every cycle. You listen and follow the moving highlight.
+- **Practice** — the app plays a phrase, then goes silent for one cycle (tabla + tanpura keep going) and shows a **Your Turn** cue so you play it back. Then it repeats.
+- **Test** — placeholder (not yet active).
+
+**Start / Pause / Stop** control playback. Leaving the player keeps audio
+running; reopening it re-syncs to the current beat. **Clear Exercise** on the
+library page unloads the exercise back to free practice.
 
 ---
 
-## Runtime dependencies
+## Creating taal variations
 
-All assets are bundled — no CDN, no npm install. Loaded as follows:
+A **taal** is a repeating rhythmic cycle of beats (matras) grouped into vibhags,
+with landmark beats — **sam** (the "1", amber), **tali** (accented, teal), and
+**khali** (hollow/quiet, purple). The app ships 10 taals (Teentaal, Ektal,
+Keherwa, Deepchandi, Rupak, Bhajani, Khemta, Dadra, Jhumra, Dhamar) plus a
+single-beat **Metronome**.
 
-- **WebAudioFont presets** (`app/webaudiofont/`, ~1.8 MB total across 4
-  files) — `WebAudioFontPlayer.js` plus 4 SoundFont JS files (Harmonium /
-  Strings / Guitar / Piano). Loaded via `<script>` tags in `index.html`;
-  exposes globals (`WebAudioFontPlayer`, `_tone_0210_…`, etc.). Notes are
-  scheduled via the player at playback time. See `swar-synth.js`.
-- **Tabla MP3 sample sets** — `tabla_e_1` (16 bols, ref Sa = E3 / 164.81
-  Hz) and `tabla_c_1` (16 bols, ref Sa = C4 / 261.63 Hz, from Naad/MIT).
-  Loaded on-demand when source changes via `fetch()` +
-  `audioCtx.decodeAudioData()`; **eagerly decoded at engine init**, never
-  lazily on first beat. Dayan bols pitch-shift by `userSa /
-  referenceFreq`; bayan bols (`Ga, Ge, Ghe, Ka, Kat, Ke`) are
-  pitch-locked. See `tabla-samples.js`.
-- **Tanpura MP3 set** — `tanpura_1` (24 files: 12 keys × 2 patterns,
-  Pa-Sa and Ma-Sa). Loaded by `tanpura-sample-engine.js` on init and on
-  engine swap; loop region trimmed (`loopStart = 1.5s`, `loopEnd =
-  duration - 3s`) to skip head/tail fade zones. Decoded eagerly. Ni-Sa
-  not yet sourced.
-- **Accent samples** — `assets/audio/other/{manjira_1, manjira_2,
-  ghungroo_1, tali_1}.mp3` (wired in `accents.js`; routed through the
-  tabla input node).
-- **Google Fonts** (Inter, Noto Sans Devanagari) — imported in
-  `styles.css`. No offline fallback yet.
+A **variation** is your custom version of a taal's theka (the bol pattern). The
+built-in default theka is read-only; your variations live alongside it.
 
----
+### Create one
 
-## Mobile audio stability (critical invariants)
+1. Main screen → tap the **Taal** tile → pick a taal → **+ New Variation** (or **Edit** an existing one).
+2. Give it a **name**.
+3. **Tap a matra cell** in the grid to select it (it highlights amber).
+4. **Tap bols** from the palette (Dha, Dhin, Tin, Na, Ta, Ge, TiRaKiTa, …) to add them to that beat — **up to 4 bols per matra**. Tap a chip to remove it, or **Clear Matra** to empty the beat. Use the rest bol (`x`) for silence.
+5. Optionally add **accents** (Manjira 1/2, Ghungroo, Tali) layered on the selected matra.
+6. **Preview** plays one cycle; the header **Play / Stop** loops it continuously, highlighting the sounding matra — edit on the fly and the changes are heard next cycle.
+7. **Save**. **Cancel** discards changes; **Delete** (on existing variations) removes it.
 
-These constraints must be preserved by any rebuild — they are the result of
-real Android Chrome stability work and removing them causes audible
-cracking and underruns. Source: `audio-engine.js`, `tanpura.js`,
-`accents.js`, `background-audio.js`.
+### Use a variation
 
-- **`AudioContext` is created with `latencyHint: 'playback'`**, sample
-  rate 44100. Larger buffer sizes; latency cost (~50–100ms) is
-  imperceptible for a practice app, stability gain is large on mobile.
-- **Swar and auxiliary buses route through `dryMix`, NOT through the
-  compressor or convolver.** The `compressor` node exists but is
-  orphaned. `reverb` (synthetic 1s room IR) is connected to `masterGain`
-  but only fed by the on-demand tabla reverb send.
-- **In single-mode tanpura, the active engine's `outputGain` connects
-  directly to `masterGain`** — bypassing `tanpuraGainA`, `panA`, and
-  `tanpuraBusGain`. Concert mode is the only path that uses the A/B bus
-  topology.
-- **All audio assets are pre-decoded at engine / player init**, never
-  lazily. `decodeAudioData` is async and CPU-intensive; doing it on the
-  first beat causes an audible glitch.
-- **Accents share the tabla input node.** Accent `AudioBufferSource`s
-  connect to `tablaGain`, not a new chain. No new graph topology per
-  matra.
-- **`background-audio.js` runs three keep-alive mechanisms** when any
-  audio source is active (ref-counted via `activate(source)` /
-  `deactivate(source)`): a 30-second silent stereo WAV looped through an
-  `<audio>` element so the OS treats the tab as "playing media";
-  `navigator.mediaSession.metadata` + no-op action handlers; a screen
-  Wake Lock. Required for PWA-on-Android background playback.
+- On the Taal Variations page, tap **Set Active** on the variation you want.
+- Or use the **`‹ D ›`** switcher on the main-screen Taal tile to cycle through default + your variations. Switching variations keeps any loaded exercise (it only changes the tabla pattern, not the base taal).
+- For the **Metronome**, instead of a variation editor you simply pick the single bol it should click.
 
 ---
 
-## Rebuild order (suggested sequence)
+## Exporting and importing
 
-Build modules in this order so dependencies resolve cleanly. Read the
-relevant doc(s) from the table above before writing each file.
+There are two levels: a full backup, and additive per-item transfers.
 
-1. **`config.js`** + **`storage.js`** — no deps. Establishes constants,
-   storage keys, defaults.
-2. **`music-engine.js`** — depends on `config.js`. Frequency / thaat /
-   swara math.
-3. **`audio-engine.js`** — depends on `config.js`. AudioContext +
-   master signal chain. Read `audio_engine.md` and obey the mobile
-   invariants above.
-4. **`tabla-samples.js`** + **`tabla.js`** — depend on `audio-engine`.
-   Sample loader and electronic synth.
-5. **`tanpura-sample-engine.js`** + **`tanpura-electronic-engine.js`** +
-   **`tanpura.js`** — depend on `audio-engine` (and on each other via
-   the controller). Read `tanpura.md`.
-6. **`swar-synth.js`** + **`accents.js`** — depend on `audio-engine` and
-   on globals exposed by `webaudiofont/*.js` (loaded via `<script>`
-   tags in `index.html`).
-7. **`taal-engine.js`** — depends on `config.js`. Lookahead beat
-   scheduler with sam/tali/khali classification.
-8. **`practice-tracker.js`** + **`profile.js`** — depend on `storage.js`.
-9. **`alankaar-engine.js`** — depends on `config.js` and `music-engine.js`.
-   Read `alankaars.md` for the compact-pattern grammar.
-10. **`background-audio.js`** — standalone (uses `<audio>` element,
-    MediaSession, Wake Lock). Ref-counted activate/deactivate.
-11. **`practice-session.js`** — depends on `taal-engine`, swar/tabla
-    engines, and the scheduler. Note: it does **not** import `tanpura.js`
-    — tanpura is UI-managed.
-12. **`ui-controller.js`** — depends on everything. ~4000 lines of UI
-    bindings. Read `features.md` and `ui_design.md`.
-13. **`app.js`** — entry point. Reads settings, calls `initUI`, wires
-    gesture-gated `audioEngine.init()` + `audioEngine.resume()`, starts
-    `practiceTracker`. See `app/js/app.js` for the exact bootstrap
-    pattern.
-14. **`css/styles.css` + `css/components.css` + `index.html`** — can
-    proceed in parallel; driven by `ui_design.md`.
+### Full backup (everything)
+
+- **Settings (⚙️) → Export Data** downloads `swaradhana_backup_<date>.json` containing all your settings, exercises, taal variations, profile, activity, and custom instruments.
+- **Settings → Import Data** restores from such a file (this **overwrites** current data after a confirmation).
+- **Settings → Clear All Data** wipes everything (double-confirmed, irreversible).
+
+Use this before reinstalling your browser or switching devices.
+
+### Per-item (additive merge — never overwrites unrelated items)
+
+Use this to move a single exercise or variation between devices safely:
+
+- **Exercises** — Exercise Library → **Export** downloads your exercises as JSON; **Import** merges them back **by id** (new ones are added, matching ids update, everything else is left alone).
+- **Taal variations** — open a taal's Variations page → **Export** / **Import** works the same way, merging by id.
+
+Because the merge is keyed by id, importing onto another device adds or updates
+only the items in the file and never disturbs the rest of your library.
 
 ---
 
-## Acceptance criteria
+## Profile and practice tracking (👤)
 
-A rebuild passes if all of the following hold:
-
-- Loads in modern Chrome with **no console errors**.
-- The first click or touch unlocks the `AudioContext` (no autoplay-policy
-  warnings on subsequent playback).
-- Tapping the Tanpura tile after selecting a key plays the tanpura drone
-  and **loops cleanly** (no click at loop boundary; sample engine trims
-  head/tail).
-- The Tabla tile plays the selected taal at the correct tempo, with the
-  **sam highlighted** in the beat grid on every cycle start.
-- Saved exercises load from `localStorage`; opening the exercise player
-  produces the correct **swara notes** (positions resolve through
-  `getPositionSwara` for the current thaat).
-- On a **mid-range Android** device, tanpura + tabla + swar playing
-  simultaneously **does not crack** (verifies the mobile invariants).
-- The **practice tracker** logs daily `appSec` (5-min idle cutoff) and
-  `exerciseSec` separately, and they appear on the Profile page.
-- **Export then Import** of the JSON backup roundtrips all
-  `swaradhana_*` `localStorage` keys without data loss.
+- **Identity** — name, avatar, and a "practicing since" date.
+- **Today** — app time, exercise (practice) time, and your 🔥 streak (current + best).
+- **Targets** — a **daily minutes** and **weekly hours** goal, with an optional *override for this week only*. The transport row's *Target* reflects this.
+- **Charts** — last 30 days, last 6 months, and lifetime, each stacking total app time vs. exercise time.
+- **Export** your activity as **JSON** or **CSV**, or **Reset history** (keeps your name/targets).
 
 ---
 
@@ -315,23 +221,12 @@ A rebuild passes if all of the following hold:
 
 Code: **MIT License** © 2026 Arun Mahapatro (see `LICENSE`).
 
-Audio assets carry per-folder `CREDITS.md`:
-
-- `app/assets/audio/tanpura/tanpura_1/` — tanpura drones from Rāga
-  Junglism (open-access). See `tanpura_1/CREDITS.md`.
-- `app/assets/audio/tabla/tabla_c_1/` — from
-  [Naad](https://github.com/oormicreations/naad) by Oormi Creations,
-  **MIT**. First variant per bol; dayan bols pitch-normalised to C4
-  during asset prep. See `tabla_c_1/CREDITS.md`.
-- `app/assets/audio/tabla/tabla_e_1/` — original bundled set, ref Sa = E3.
-- `app/webaudiofont/` — SoundFont data from the WebAudioFont project
-  (FluidR3, Aspirin, Chaos). Each file carries its own license header.
-
-If you redistribute the app, retain these `CREDITS.md` files.
+Audio assets carry per-folder `CREDITS.md` (tanpura drones, tabla sample sets
+from Naad/Oormi Creations, and WebAudioFont SoundFont data). Retain these
+`CREDITS.md` files if you redistribute the app.
 
 ---
 
 ## Author
 
-**Arun Mahapatro.** Personal project. Open an issue for bugs / feature
-requests.
+**Arun Mahapatro.** Personal project. Open an issue for bugs / feature requests.
