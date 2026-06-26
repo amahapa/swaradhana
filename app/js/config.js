@@ -112,6 +112,8 @@ export const PRACTICE_DEFAULTS = Object.freeze({
   pitchTolerance: 'intermediate',
   /** Default taal (rhythmic cycle) */
   taal: 'teentaal',
+  /** Tabla bol sounded on the single beat of the Metronome taal */
+  metronomeBol: 'Na',
   /** Default thaat (scale/mode) */
   thaat: 'bilawal',
   /** Default alankaar pattern — 'scale' = full aroha/avaroha */
@@ -609,6 +611,22 @@ export const TAAL_DEFINITIONS = Object.freeze({
       'Ta',  'Dhi', 'Ta', 'Dhi',
     ]),
     theka: 'Ka Dhi Ta Dhi Ta | Dha x | Ti Ta x | Ta Dhi Ta Dhi',
+  }),
+  // Metronome: a single repeating beat with a user-chosen tabla bol. It has no
+  // vibhag/cycle/avartan structure — exercises composed on it flow continuously
+  // (aroha straight into avaroha and back, no breaks). The bol on the beat comes
+  // from settings.metronomeBol at playback time, not from this `bols` array.
+  metronome: Object.freeze({
+    id: 'metronome',
+    name: 'Metronome',
+    nameHindi: 'मेट्रोनोम',
+    beats: 1,
+    vibhag: Object.freeze([1]),
+    sam: 1,
+    tpiSequence: Object.freeze(['X']),
+    bols: Object.freeze(['Na']),
+    theka: 'Na',
+    isMetronome: true,
   }),
 });
 

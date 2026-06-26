@@ -293,111 +293,8 @@ export function compactPatternToString(vibhags) {
   }).join(' ');
 }
 
-/**
- * Generates full aroha + avaroha cycles from a parsed compact pattern.
- * Increments all digits by 1 for each subsequent cycle until the range
- * boundary is exceeded.
- *
- * @param {Object} options
- * @param {Object} parsed - Output from parseCompactPattern
- * @param {number} [rangeStart=4] - Starting flute position (maps to digit baseDigit)
- * @param {number} [rangeEnd=11] - Ending flute position
- * @returns {{
- *   arohaCycles: Array<{beats: Array<{positions: Array<number|null>}>}>,
- *   avarohaCycles: Array<{beats: Array<{positions: Array<number|null>}>}>,
- *   beatStructure: number[],
- *   compactNotation: string
- * }}
- */
-export function generateFromCompactPattern(options) {
-  const { parsed, rangeStart = 4, rangeEnd = 11 } = options;
-
-  if (parsed.error) {
-    return { arohaCycles: [], avarohaCycles: [], beatStructure: parsed.beatStructure, compactNotation: '' };
-  }
-
-  const beatStructure = parsed.beatStructure;
-
-  // Map digit to flute position: digit d -> rangeStart + (d - baseDigit)
-  // '_' (sustain) passes through as '_'
-  function digitToPosition(digit, increment) {
-    if (digit === null) return null;
-    if (digit === '_') return '_';
-    return rangeStart + (digit - parsed.baseDigit) + increment;
-  }
-
-  // Check if all positions in a cycle are within valid range (skip nulls and '_')
-  function cycleInRange(increment) {
-    for (const note of parsed.flat) {
-      if (note === null || note === '_') continue;
-      const pos = digitToPosition(note, increment);
-      if (pos < MIN_POSITION || pos > MAX_POSITION) return false;
-      if (pos > rangeEnd + 3) return false; // allow slight overshoot for wide patterns
-    }
-    return true;
-  }
-
-  // Build one cycle of beats from the parsed vibhag structure with an increment
-  function buildCycle(increment, reversed) {
-    const sourceFlat = reversed ? [...parsed.flat].reverse() : parsed.flat;
-    const beats = [];
-    let flatIdx = 0;
-    for (const notesInBeat of beatStructure) {
-      const positions = [];
-      for (let s = 0; s < notesInBeat; s++) {
-        const note = sourceFlat[flatIdx];
-        positions.push(digitToPosition(note, increment));
-        flatIdx++;
-      }
-      beats.push({ positions });
-    }
-    return { beats };
-  }
-
-  // Generate aroha cycles
-  const arohaCycles = [];
-  let maxPosReached = rangeStart;
-  for (let inc = 0; inc < 50; inc++) { // safety limit
-    if (!cycleInRange(inc)) break;
-    const cycle = buildCycle(inc, false);
-    arohaCycles.push(cycle);
-    // Track highest position
-    for (const note of parsed.flat) {
-      if (note !== null) {
-        const pos = digitToPosition(note, inc);
-        if (pos > maxPosReached) maxPosReached = pos;
-      }
-    }
-  }
-
-  // Generate avaroha cycles (mirror: reversed flat, decrementing)
-  const avarohaCycles = [];
-  // Find the highest increment used in aroha
-  const lastArohaInc = arohaCycles.length > 0 ? arohaCycles.length - 1 : 0;
-
-  for (let inc = lastArohaInc; inc >= 0; inc--) {
-    // Check if reversed cycle is in range
-    let valid = true;
-    for (const note of parsed.flat) {
-      if (note === null) continue;
-      const pos = digitToPosition(note, inc);
-      if (pos < MIN_POSITION || pos > MAX_POSITION) { valid = false; break; }
-    }
-    if (!valid) continue;
-    const cycle = buildCycle(inc, true);
-    avarohaCycles.push(cycle);
-  }
-
-  return {
-    arohaCycles,
-    avarohaCycles,
-    beatStructure,
-    compactNotation: compactPatternToString(parsed.vibhags),
-  };
-}
-
 // ---------------------------------------------------------------------------
-// "Last+1" extension — sequential continuation generator
+// Seed-series generation (both extension modes)
 // ---------------------------------------------------------------------------
 
 /**
@@ -516,48 +413,48 @@ export function parseCompactPatternSeed(input) {
 }
 
 /**
- * "Last+1" extension generator.
+ * Unified seed-series generator for BOTH extension modes.
  *
- * Treats the seed as a rhythmic-melodic **template** and repeats it
- * across the full taal cycle. On each repetition, every numeric digit
- * in the template is shifted by the seed's **span**:
+ * A short compact-pattern seed (any length up to the taal's matra count) is
+ * tiled — notes AND rhythm together — across the playable range, then laid into
+ * taal cycles. The two modes differ only in how far each repetition shifts up:
  *
  * ```
- *   span = (max digit in seed) − (min digit in seed) + 1
+ *   first-plus-1 : shift = 1                              (overlapping climb)
+ *   last-plus-1  : shift = lastNumeric - firstNumeric + 1 (non-overlapping blocks)
  * ```
  *
- * Rests (`.`) and sustains (`_`) are preserved verbatim across every
- * repetition. When a shifted digit maps to a flute position beyond
- * `rangeEnd`, that slot is silenced.
+ * Climbing stops once the seed's peak note reaches the End note (rangeEnd); any
+ * note beyond the range is silenced. Rests (`.`) and sustains (`_`) and `[..]`
+ * grouping are preserved verbatim. Phrases may straddle taal-cycle boundaries
+ * when the seed length is not a factor of the taal's matra count. The avaroha is
+ * the exact vertical reflection of the aroha (see below).
  *
  * Examples (Teentaal, 16 matras, range 1..15):
- *   seed `1234` (span 4) → 1,2,3,4 | 5,6,7,8 | 9,10,11,12 | 13,14,15,.
- *   seed `1122` (span 2) → 1,1,2,2 | 3,3,4,4 | 5,5,6,6 | 7,7,8,8
- *   seed `[12]` (span 2) → [1,2][3,4][5,6][7,8][9,10][11,12][13,14][15,.]
- *
- * The seed's laykari (notes-per-matra) is also preserved by cycling
- * through `seed.beatStructure` for every matra of the taal.
+ *   seed `[12][12]3`, first-plus-1 → [1,2][1,2]3 [2,3][2,3]4 [3,4][3,4]5 …
+ *   seed `[12][12]3`, last-plus-1  → [1,2][1,2]3 [4,5][4,5]6 [7,8][7,8]9 …
  *
  * @param {object} options
  * @param {string} options.seedInput   raw compact-pattern seed as typed
  * @param {string} options.taalId      must exist in TAAL_DEFINITIONS
- * @param {number} options.rangeStart  flute position (1..15)
- * @param {number} options.rangeEnd    flute position (rangeStart..15)
+ * @param {number} [options.rangeStart=1] flute position (1..15)
+ * @param {number} [options.rangeEnd=15]  flute position (rangeStart..15)
+ * @param {'first-plus-1'|'last-plus-1'} [options.mode='first-plus-1']
  * @returns {{
  *   arohaCycles,
  *   avarohaCycles,
  *   beatStructure,
- *   compactNotation,      // stays as the seed — per option A-i
- *   extensionMode: 'last-plus-1',
+ *   compactNotation,      // stays as the seed as typed
+ *   extensionMode,
  *   error?: string
  * }}
  */
-export function generateFromCompactPatternLastPlusOne(options) {
-  const { seedInput, taalId, rangeStart = 1, rangeEnd = 15 } = options;
+export function generateFromSeed(options) {
+  const { seedInput, taalId, rangeStart = 1, rangeEnd = 15, mode = 'first-plus-1' } = options;
 
   const empty = {
     arohaCycles: [], avarohaCycles: [], beatStructure: [],
-    compactNotation: seedInput || '', extensionMode: 'last-plus-1',
+    compactNotation: seedInput || '', extensionMode: mode,
   };
 
   const taalDef = TAAL_DEFINITIONS[taalId];
@@ -567,116 +464,130 @@ export function generateFromCompactPatternLastPlusOne(options) {
   if (seed.error) return { ...empty, error: seed.error };
 
   const totalMatras = taalDef.vibhag.reduce((a, b) => a + b, 0);
-  const seedMatras = seed.beatStructure.length;
-  if (seedMatras > totalMatras) {
-    return { ...empty, error: `Seed has ${seedMatras} matras but ${taalDef.name} only has ${totalMatras}.` };
+  const seedBeats = seed.vibhags.flat(); // per-matra note groups (digit | null | '_')
+  // The Metronome (1 matra, no vibhags) has no cycle to fit the seed into — the
+  // seed simply tiles continuously — so skip the seed-length check for it.
+  if (!taalDef.isMetronome && seedBeats.length > totalMatras) {
+    return { ...empty, error: `Seed has ${seedBeats.length} matras but ${taalDef.name} only has ${totalMatras}.` };
   }
 
-  // Find the first and last numeric digits in the seed (in playback order).
-  // The shift between consecutive iterations is chosen so that the first
-  // digit of the next iteration equals the last digit of the current + 1:
-  //   shift = lastNumeric + 1 - firstNumeric
-  // This honours the "Last+1" rule regardless of where the max digit sits.
-  let firstNumeric = null;
-  let lastNumeric = null;
+  // First / last / max numeric digits of the seed (in playback order).
+  let firstNumeric = null, lastNumeric = null, maxNumeric = -Infinity;
   for (const n of seed.flat) {
     if (typeof n === 'number') {
       if (firstNumeric === null) firstNumeric = n;
       lastNumeric = n;
+      if (n > maxNumeric) maxNumeric = n;
     }
   }
   if (firstNumeric === null) {
     return { ...empty, error: 'Seed must contain at least one note digit (1-9).' };
   }
-  const shift = lastNumeric + 1 - firstNumeric;
+
+  // Shift added to every note on each successive repetition:
+  //   first-plus-1: 1                              (overlapping climb)
+  //   last-plus-1:  lastNumeric - firstNumeric + 1 (non-overlapping blocks)
+  const shift = (mode === 'last-plus-1') ? (lastNumeric - firstNumeric + 1) : 1;
   if (shift <= 0) {
     return { ...empty, error: 'Last+1 requires the seed\'s last digit to be ≥ first digit (ascending progression).' };
   }
 
-  // Build per-matra notes-per-beat by cycling through the seed's beatStructure.
-  const beatStructure = [];
-  for (let m = 0; m < totalMatras; m++) {
-    beatStructure.push(seed.beatStructure[m % seed.beatStructure.length]);
-  }
-  const notesPerCycle = beatStructure.reduce((a, b) => a + b, 0);
+  // Digit that maps to the End note (rangeEnd); the climb stops once the seed's
+  // peak note reaches it.
+  const topDigit = seed.baseDigit + (rangeEnd - rangeStart);
 
-  // The top digit that corresponds to rangeEnd (e.g. P'). Aroha extension
-  // continues until the iteration's last digit reaches this value.
-  const rangeDigitTop = seed.baseDigit + (rangeEnd - rangeStart);
-
-  // Emit seed iterations until the last digit of the iteration reaches
-  // rangeDigitTop. Each iteration k shifts every numeric digit by k × shift;
-  // '.' and '_' pass through unchanged. Any digit that exceeds rangeDigitTop
-  // is clamped to silence so the rhythm stays intact.
-  const arohaFlat = [];
-  for (let k = 0; k < 200; k++) {
-    for (const n of seed.flat) {
-      if (n === null) arohaFlat.push(null);
-      else if (n === '_') arohaFlat.push('_');
-      else if (n + k * shift > rangeDigitTop) arohaFlat.push(null);
-      else arohaFlat.push(n + k * shift);
+  // Tile the seed into one continuous matra stream — notes AND rhythm tiled
+  // together, so a phrase keeps its matra-length throughout. Repetition k shifts
+  // every digit by k * shift; '.' rests and '_' sustains pass through, and any
+  // note beyond the range is silenced.
+  const matras = [];
+  for (let k = 0; k < 400; k++) { // safety limit
+    for (const beat of seedBeats) {
+      const positions = beat.map(n => {
+        if (n === null) return null;
+        if (n === '_') return '_';
+        const pos = rangeStart + (n - seed.baseDigit) + k * shift;
+        return (pos > rangeEnd || pos < rangeStart) ? null : pos;
+      });
+      matras.push({ positions });
     }
-    if (lastNumeric + k * shift >= rangeDigitTop) break;
+    if (maxNumeric + k * shift >= topDigit) break; // peak reached the ceiling
   }
 
-  // Pad a flat sequence with silence so its length is a multiple of
-  // notesPerCycle (i.e. the last taal cycle is completed).
-  function padToCycle(flat) {
-    const rem = flat.length % notesPerCycle;
-    if (rem === 0) return flat.slice();
-    const out = flat.slice();
-    const pad = notesPerCycle - rem;
-    for (let i = 0; i < pad; i++) out.push(null);
-    return out;
-  }
+  // `matras` is the continuous AROHA stream (not yet cycle-padded).
+  const arohaMatras = matras;
 
-  const arohaPadded = padToCycle(arohaFlat);
+  // Avaroha = vertical reflection of the aroha (same matra order, so it begins
+  // at the peak): every played note p -> (peak + valley - p); '_' sustains and
+  // '.' rests pass through. Identical beats map to identical beats.
+  let valley = Infinity, peak = -Infinity;
+  for (const m of arohaMatras)
+    for (const p of m.positions)
+      if (typeof p === 'number') { if (p < valley) valley = p; if (p > peak) peak = p; }
+  const reflect = p => (typeof p === 'number') ? (peak + valley - p) : p;
+  const avarohaMatras = arohaMatras.map(m => ({ positions: m.positions.map(reflect) }));
 
-  // Avaroha starts at a NEW taal cycle, beginning with the peak note and
-  // descending to the seed's first (minimum) note. To ensure avaroha starts
-  // at the peak (not a rest from padding or overshoot), reverse the UNPADDED
-  // aroha, then strip any leading silence before padding the tail.
-  const reversed = arohaFlat.slice().reverse();
-  let startIdx = 0;
-  while (startIdx < reversed.length && reversed[startIdx] === null) startIdx++;
-  const avarohaPadded = padToCycle(reversed.slice(startIdx));
-
-  // Split a flat sequence into one or more taal cycles. Each cycle is
-  // reshaped by mapping digits to flute positions; positions outside the
-  // [rangeStart, rangeEnd] range become silence (null).
-  function reshapeCycles(flat) {
-    const cycles = [];
-    for (let c = 0; c < flat.length; c += notesPerCycle) {
-      const cycleFlat = flat.slice(c, c + notesPerCycle);
-      const beats = [];
-      let flatIdx = 0;
-      for (let m = 0; m < totalMatras; m++) {
-        const npm = beatStructure[m];
-        const rawNotes = cycleFlat.slice(flatIdx, flatIdx + npm);
-        flatIdx += npm;
-        const positions = rawNotes.map(n => {
-          if (n === null) return null;
-          if (n === '_') return '_';
-          if (typeof n === 'number') {
-            const pos = rangeStart + (n - seed.baseDigit);
-            return (pos > rangeEnd || pos < rangeStart) ? null : pos;
-          }
-          return null;
-        });
-        beats.push({ positions });
-      }
-      cycles.push({ beats });
+  // Pad a matra list with rests up to the next VIBHAG boundary, so the following
+  // section starts cleanly on a vibhag instead of wasting the rest of the cycle.
+  const vibhagCuts = [];
+  { let acc = 0; for (const v of taalDef.vibhag) { acc += v; vibhagCuts.push(acc); } }
+  function padToVibhag(arr) {
+    const within = arr.length % totalMatras;
+    if (within !== 0) {
+      const nextCut = vibhagCuts.find(c => c >= within) ?? totalMatras;
+      const target = (arr.length - within) + nextCut;
+      while (arr.length < target) arr.push({ positions: [null] });
     }
-    return cycles;
+    return arr;
   }
+
+  // Build the repeating BLOCK: aroha -> (rest to next vibhag) -> avaroha ->
+  // (rest to next vibhag). Both the internal junction and the block end sit on
+  // vibhag boundaries, so when blocks tile, a section transition never wastes
+  // more than the rest of its current vibhag. avarohaStartMatra is the
+  // block-relative index where the descending half begins.
+  const block = padToVibhag([...arohaMatras]);
+  const avarohaStartMatra = block.length;
+  block.push(...avarohaMatras);
+  padToVibhag(block);
+  const blockMatras = block.length;
+
+  // Repeat the block to the next whole number of taal cycles (LCM with
+  // totalMatras) so the exercise loops cleanly on sam. When a vibhag-aligned
+  // block is not itself a whole cycle, the alankaar shifts within the taal from
+  // one block to the next (expected) — but every transition stays on a vibhag
+  // boundary with no wasted cycle.
+  const gcd = (a, b) => { while (b) { [a, b] = [b, a % b]; } return a; };
+  const reps = blockMatras > 0 ? totalMatras / gcd(blockMatras, totalMatras) : 1;
+  const combined = [];
+  for (let r = 0; r < reps; r++)
+    for (const m of block) combined.push({ positions: [...m.positions] });
+
+  const arohaCycles = [];
+  for (let i = 0; i < combined.length; i += totalMatras) {
+    arohaCycles.push({ beats: combined.slice(i, i + totalMatras) });
+  }
+
+  // Per-matra note counts for ONE taal cycle (used for laykari detection).
+  const beatStructure = (arohaCycles[0] ? arohaCycles[0].beats : []).map(b => b.positions.length);
 
   return {
-    arohaCycles: reshapeCycles(arohaPadded),
-    avarohaCycles: reshapeCycles(avarohaPadded),
+    arohaCycles,
+    avarohaCycles: [],
+    avarohaStartMatra,
+    blockMatras,
     beatStructure,
-    compactNotation: seedInput, // stays as the seed (A-i)
-    extensionMode: 'last-plus-1',
+    compactNotation: seedInput,
+    extensionMode: mode,
   };
+}
+
+/**
+ * Back-compat wrapper — the "Last+1" extension is now {@link generateFromSeed}
+ * with mode `'last-plus-1'`.
+ */
+export function generateFromCompactPatternLastPlusOne(options) {
+  return generateFromSeed({ ...options, mode: 'last-plus-1' });
 }
 
 // ---------------------------------------------------------------------------

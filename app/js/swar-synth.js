@@ -16,6 +16,7 @@
 import audioEngine from './audio-engine.js';
 import { SWAR_RATIOS } from './config.js';
 import { getPositionFreq } from './music-engine.js';
+import vocalEngine from './vocal-engine.js';
 
 // ---------------------------------------------------------------------------
 // Script loader utility
@@ -198,17 +199,20 @@ class SwarSynth {
         // Normalize to array
         const voiceList = Array.isArray(voices) ? voices : [voices];
 
-        // Validate all voices
+        // Validate all voices ('vocal' is sample-backed, not a WebAudioFont preset)
         for (const v of voiceList) {
-            if (!this.presets[v]) {
-                console.warn(`[SwarSynth] Unknown voice "${v}". Available: ${Object.keys(this.presets).join(', ')}`);
+            if (v !== 'vocal' && !this.presets[v]) {
+                console.warn(`[SwarSynth] Unknown voice "${v}". Available: ${Object.keys(this.presets).join(', ')}, vocal`);
             }
         }
 
-        this.activeVoices = voiceList.filter(v => this.presets[v]);
-        // Keep backward compat — activePreset = first voice
-        this.activePreset = this.presets[this.activeVoices[0]] || this.presets.harmonium;
+        this.activeVoices = voiceList.filter(v => v === 'vocal' || this.presets[v]);
+        // Keep backward compat — activePreset = first preset-backed voice
+        const firstPreset = this.activeVoices.find(v => this.presets[v]);
+        this.activePreset = this.presets[firstPreset] || this.presets.harmonium;
         this.currentVoice = this.activeVoices.join('+');
+        // Vocal samples load lazily the first time the voice is selected.
+        if (this.activeVoices.includes('vocal')) vocalEngine.load();
         console.log('[SwarSynth] Active voices:', this.activeVoices.join(', '));
     }
 
@@ -370,6 +374,13 @@ class SwarSynth {
         const baseVolume = velocity / Math.sqrt(voicesToPlay.length); // scale down to avoid clipping
 
         for (const voiceName of voicesToPlay) {
+            // Vocal voice uses sampled human snippets, not a WebAudioFont preset.
+            if (voiceName === 'vocal') {
+                const voiceVol = this.voiceVolumes.vocal ?? 1.0;
+                vocalEngine.playNote(position, thaat, baseSaFreq, startTime, duration, baseVolume * voiceVol, destination);
+                continue;
+            }
+
             const preset = this.presets[voiceName];
             if (!preset) continue;
 

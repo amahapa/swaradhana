@@ -111,25 +111,25 @@
 
   <!-- 3. Mode selector — 3 buttons -->
   <!-- 4. Transport row — completed time, target time, start/pause/stop -->
-  <div style="display:flex; align-items:center; gap:8px; padding:4px 16px;">
+  <div style="display:flex; align-items:center; gap:8px; padding:9px 16px;">
     <div style="display:flex; gap:12px; flex:1;">
       <div>
-        <div style="font-size:0.65rem; color:var(--text-dim);">Completed</div>
-        <div id="timer-display" style="font-size:0.9rem; font-weight:600; color:var(--text-primary);">0 mins</div>
+        <div style="font-size:1rem; color:var(--text-dim);">Completed</div>
+        <div id="timer-display" style="font-size:1.35rem; font-weight:600; color:var(--text-primary);">0 mins</div>
       </div>
       <div>
-        <div style="font-size:0.65rem; color:var(--text-dim);">Target</div>
-        <div id="target-display" style="font-size:0.9rem; font-weight:600; color:var(--text-secondary);">30 mins</div>
+        <div style="font-size:1rem; color:var(--text-dim);">Target</div>
+        <div id="target-display" style="font-size:1.35rem; font-weight:600; color:var(--text-secondary);">30 mins</div>
       </div>
     </div>
-    <button id="btn-start" class="btn btn-primary btn-sm">Start</button>
-    <button id="btn-pause" class="btn btn-sm" disabled>Pause</button>
-    <button id="btn-stop" class="btn btn-sm" disabled>Stop</button>
+    <button id="btn-start" class="btn btn-primary btn-sm" style="font-size:0.95rem !important; padding:7px 14px !important; min-height:42px !important;">Start</button>
+    <button id="btn-pause" class="btn btn-sm" style="font-size:0.95rem !important; padding:7px 14px !important; min-height:42px !important;" disabled>Pause</button>
+    <button id="btn-stop" class="btn btn-sm" style="font-size:0.95rem !important; padding:7px 14px !important; min-height:42px !important;" disabled>Stop</button>
   </div>
 
   <!-- 5. Exercise bar — full width below transport -->
   <div style="margin:4px 16px 0; padding:10px 14px; background:var(--bg-tertiary); border-radius:10px; display:flex; align-items:center; justify-content:space-between;">
-    <span id="btn-open-exercise-library" style="font-size:0.75rem; color:var(--text-dim); cursor:pointer;">Exercise</span>
+    <span id="btn-open-exercise-library" style="font-size:1rem; color:#ffffff; cursor:pointer;">Exercise</span>
     <span id="exercise-display" style="font-size:0.9rem; font-weight:600; color:var(--text-primary); cursor:pointer; flex:1; text-align:right;" title="Tap to view exercise table">None</span>
   </div>
 
@@ -600,6 +600,10 @@
       <div id="taal-variations-container">
         <!-- JS will populate with variation items -->
       </div>
+      <div id="taal-var-io-row" style="display:flex; gap:8px; margin-top:12px;">
+        <button id="btn-export-all-variations" class="btn btn-sm btn-ghost" style="flex:1;">Export all variations</button>
+        <button id="btn-import-variations" class="btn btn-sm btn-ghost" style="flex:1;">Import</button>
+      </div>
     </div>
   </div>
 
@@ -609,6 +613,9 @@
   <div id="taal-var-editor-page" class="full-page hidden">
     <div class="full-page-header">
       <h2 style="margin:0;" id="taal-var-editor-title">Editing: New Variation</h2>
+      <button id="btn-var-play" class="btn btn-sm" style="margin-left:auto; margin-right:8px;">
+        <span style="font-size:1.1rem;">▶</span> Play
+      </button>
       <button id="btn-cancel-var-editor" class="btn btn-sm btn-ghost">← Cancel</button>
     </div>
     <div class="full-page-body">
@@ -679,9 +686,16 @@
         <!-- JS populates -->
       </div>
       <button id="btn-new-exercise" class="btn btn-sm btn-primary" style="margin-top:12px; width:100%;">+ New Exercise</button>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button id="btn-export-all-exercises" class="btn btn-sm btn-ghost" style="flex:1;">Export all</button>
+        <button id="btn-import-exercises" class="btn btn-sm btn-ghost" style="flex:1;">Import</button>
+      </div>
       <button id="btn-clear-exercise" class="btn btn-sm btn-ghost" style="margin-top:8px; width:100%;">Clear Exercise (Free Practice)</button>
     </div>
   </div>
+
+  <!-- Shared hidden file input for per-item (exercise / variation) import -->
+  <input type="file" id="item-import-file-input" accept=".json" style="display:none;" />
 
 
   <!-- ====================================================================
@@ -731,6 +745,9 @@
         <div style="display:flex; gap:8px; margin-top:12px;">
           <button id="btn-generate-first-plus-1" class="btn btn-sm btn-primary" style="flex:1;" title="Each new cycle shifts the seed's first note up by +1 until the range is filled">First&nbsp;+&nbsp;1</button>
           <button id="btn-generate-last-plus-1" class="btn btn-sm btn-primary" style="flex:1;" title="Seed fills the first matras; remaining matras continue sequentially from last+1, then silence">Last&nbsp;+&nbsp;1</button>
+        </div>
+        <div style="margin-top:8px;">
+          <button id="btn-add-blank-cycle" class="btn btn-sm btn-ghost" style="width:100%;" title="Compose by hand — add an empty taal cycle (or note, for the Metronome) and fill the matras yourself">+ Add blank cycle</button>
         </div>
       </div>
 
@@ -810,6 +827,9 @@
         <div style="display:flex; gap:8px; margin-top:12px;">
           <button id="btn-edit-regenerate-first-plus-1" class="btn btn-sm btn-primary" style="flex:1;" title="Each new cycle shifts the seed's first note up by +1 until the range is filled">First&nbsp;+&nbsp;1</button>
           <button id="btn-edit-regenerate-last-plus-1" class="btn btn-sm btn-primary" style="flex:1;" title="Seed fills the first matras; remaining matras continue sequentially from last+1, then silence">Last&nbsp;+&nbsp;1</button>
+        </div>
+        <div style="margin-top:8px;">
+          <button id="btn-edit-add-blank-cycle" class="btn btn-sm btn-ghost" style="width:100%;" title="Add an empty taal cycle (or note, for the Metronome) and fill the matras yourself">+ Add blank cycle</button>
         </div>
       </div>
       <!-- Preview tables -->
